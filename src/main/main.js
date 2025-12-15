@@ -289,7 +289,7 @@ ipcMain.handle('departments:create', async (event, department) => {
 ipcMain.handle('database:backup', async () => {
   try {
     const userDataPath = app.getPath('userData');
-    const dbPath = path.join(userDataPath, 'company-admin.db');
+    const dbPath = path.join(userDataPath, 'company-admin.sqlite');
     const backupPath = path.join(userDataPath, `company-admin-backup-${Date.now()}.db`);
     
     const fs = require('fs');
