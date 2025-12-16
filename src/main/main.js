@@ -107,14 +107,14 @@ function createMenu() {
           label: 'Documentation',
           click: async () => {
             const { shell } = require('electron');
-            await shell.openExternal('https://docs.example.com');
+            await shell.openExternal('https://github.com/carlodandan/company-admin-pro/wiki');
           }
         },
         {
           label: 'Report Issue',
           click: async () => {
             const { shell } = require('electron');
-            await shell.openExternal('https://github.com/example/issues');
+            await shell.openExternal('https://github.com/carlodandan/company-admin-pro/issues');
           }
         }
       ]
