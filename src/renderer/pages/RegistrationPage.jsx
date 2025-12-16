@@ -149,31 +149,28 @@ const RegistrationPage = ({ onRegister }) => {
 };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-linear-to-br from-gray-900 to-black p-3 overflow-y-auto">
+    <div className="min-h-screen flex items-center justify-center bg-linear-to-br from-gray-100 to-gray-300 p-3 overflow-y-auto">
       <div className="w-full max-w-lg">
         {/* Header - More Compact */}
         <div className="text-center mb-4">
-          <h1 className="text-xl font-bold text-white mb-1">Admin System Setup</h1>
+          <h1 className="text-xl font-bold text-black mb-1">Admin System Setup</h1>
         </div>
 
         {/* Registration Card - Smaller */}
-        <div className="bg-gray-800/50 backdrop-blur-lg rounded-xl border border-gray-700/50 p-4 shadow-xl max-h-[90vh] overflow-y-auto">
+        <div className="bg-white backdrop-blur-lg rounded-xl border border-gray-700/50 p-4 shadow-xl max-h-[90vh] overflow-y-auto">
           
           {!registrationComplete ? (
             <form onSubmit={handleSubmit} className="space-y-4">
               {/* Company Information */}
               <div className="space-y-3">
                 <div className="flex items-center space-x-2">
-                  <div className="p-1 bg-blue-500/20 rounded">
-                    <Building2 className="h-4 w-4 text-blue-400" />
-                  </div>
-                  <h2 className="text-base font-semibold text-white">Company Details</h2>
+                  <h2 className="text-base font-semibold text-black">Company Account Details</h2>
                 </div>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {/* Company Name */}
                   <div className="space-y-1">
-                    <label htmlFor="company_name" className="block text-xs font-medium text-gray-300">
+                    <label htmlFor="company_name" className="block text-xs font-medium text-gray-800">
                       Company Name *
                     </label>
                     <input
@@ -182,9 +179,9 @@ const RegistrationPage = ({ onRegister }) => {
                       type="text"
                       value={formData.company_name}
                       onChange={handleInputChange}
-                      className={`w-full py-2 px-3 bg-gray-900/50 border ${
+                      className={`w-full py-2 px-3 bg-gray-50 border ${
                         formErrors.company_name ? 'border-red-500' : 'border-gray-700'
-                      } rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent text-xs transition-all duration-200`}
+                      } rounded-lg text-black placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent text-xs transition-all duration-200`}
                       placeholder="Enter company name"
                     />
                     {formErrors.company_name && (
@@ -197,20 +194,20 @@ const RegistrationPage = ({ onRegister }) => {
 
                   {/* Company Email */}
                   <div className="space-y-1">
-                    <label htmlFor="company_email" className="block text-xs font-medium text-gray-300">
+                    <label htmlFor="company_email" className="block text-xs font-medium text-gray-800">
                       Company Email *
                     </label>
                     <div className="relative">
-                      <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-400" />
+                      <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-700" />
                       <input
                         id="company_email"
                         name="company_email"
                         type="email"
                         value={formData.company_email}
                         onChange={handleInputChange}
-                        className={`pl-8 w-full py-2 bg-gray-900/50 border ${
+                        className={`pl-8 w-full py-2 bg-gray-50 border ${
                           formErrors.company_email ? 'border-red-500' : 'border-gray-700'
-                        } rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent text-xs transition-all duration-200`}
+                        } rounded-lg text-black placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent text-xs transition-all duration-200`}
                         placeholder="company@example.com"
                       />
                     </div>
@@ -224,18 +221,18 @@ const RegistrationPage = ({ onRegister }) => {
 
                   {/* Company Address */}
                   <div className="space-y-1">
-                    <label htmlFor="company_address" className="block text-xs font-medium text-gray-300">
+                    <label htmlFor="company_address" className="block text-xs font-medium text-gray-800">
                       Company Address
                     </label>
                     <div className="relative">
-                      <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-400" />
+                      <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-700" />
                       <input
                         id="company_address"
                         name="company_address"
                         type="text"
                         value={formData.company_address}
                         onChange={handleInputChange}
-                        className="pl-8 w-full py-2 bg-gray-900/50 border border-gray-700 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent text-xs transition-all duration-200"
+                        className="pl-8 w-full py-2 bg-gray-50 border border-gray-700 rounded-lg text-black placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent text-xs transition-all duration-200"
                         placeholder="Street, City, Country"
                       />
                     </div>
@@ -243,19 +240,19 @@ const RegistrationPage = ({ onRegister }) => {
 
                   {/* Company Phone */}
                   <div className="space-y-1">
-                    <label htmlFor="company_phone" className="block text-xs font-medium text-gray-300">
+                    <label htmlFor="company_phone" className="block text-xs font-medium text-gray-800">
                       Company Phone
                     </label>
                     <div className="relative">
-                      <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-400" />
+                      <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-700" />
                       <input
                         id="company_phone"
                         name="company_phone"
                         type="tel"
                         value={formData.company_phone}
                         onChange={handleInputChange}
-                        className="pl-8 w-full py-2 bg-gray-900/50 border border-gray-700 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent text-xs transition-all duration-200"
-                        placeholder="+1 (555) 123-4567"
+                        className="pl-8 w-full py-2 bg-gray-50 border border-gray-700 rounded-lg text-black placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent text-xs transition-all duration-200"
+                        placeholder="+639123456789"
                       />
                     </div>
                   </div>
@@ -265,29 +262,26 @@ const RegistrationPage = ({ onRegister }) => {
               {/* Admin Information */}
               <div className="space-y-3">
                 <div className="flex items-center space-x-2">
-                  <div className="p-1 bg-purple-500/20 rounded">
-                    <Briefcase className="h-4 w-4 text-purple-400" />
-                  </div>
-                  <h2 className="text-base font-semibold text-white">Admin Account</h2>
+                  <h2 className="text-base font-semibold text-black">Admin Account Details</h2>
                 </div>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {/* Admin Name */}
                   <div className="space-y-1">
-                    <label htmlFor="admin_name" className="block text-xs font-medium text-gray-300">
+                    <label htmlFor="admin_name" className="block text-xs font-medium text-gray-800">
                       Full Name *
                     </label>
                     <div className="relative">
-                      <User className="absolute left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-400" />
+                      <User className="absolute left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-700" />
                       <input
                         id="admin_name"
                         name="admin_name"
                         type="text"
                         value={formData.admin_name}
                         onChange={handleInputChange}
-                        className={`pl-8 w-full py-2 bg-gray-900/50 border ${
+                        className={`pl-8 w-full py-2 bg-gray-50 border ${
                           formErrors.admin_name ? 'border-red-500' : 'border-gray-700'
-                        } rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent text-xs transition-all duration-200`}
+                        } rounded-lg text-black placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent text-xs transition-all duration-200`}
                         placeholder="John Doe"
                       />
                     </div>
@@ -301,20 +295,20 @@ const RegistrationPage = ({ onRegister }) => {
 
                   {/* Admin Email */}
                   <div className="space-y-1">
-                    <label htmlFor="admin_email" className="block text-xs font-medium text-gray-300">
+                    <label htmlFor="admin_email" className="block text-xs font-medium text-gray-800">
                       Email Address *
                     </label>
                     <div className="relative">
-                      <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-400" />
+                      <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-700" />
                       <input
                         id="admin_email"
                         name="admin_email"
                         type="email"
                         value={formData.admin_email}
                         onChange={handleInputChange}
-                        className={`pl-8 w-full py-2 bg-gray-900/50 border ${
+                        className={`pl-8 w-full py-2 bg-gray-50 border ${
                           formErrors.admin_email ? 'border-red-500' : 'border-gray-700'
-                        } rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent text-xs transition-all duration-200`}
+                        } rounded-lg text-black placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent text-xs transition-all duration-200`}
                         placeholder="admin@example.com"
                       />
                     </div>
@@ -328,26 +322,26 @@ const RegistrationPage = ({ onRegister }) => {
 
                   {/* Password */}
                   <div className="space-y-1">
-                    <label htmlFor="admin_password" className="block text-xs font-medium text-gray-300">
+                    <label htmlFor="admin_password" className="block text-xs font-medium text-gray-800">
                       Password *
                     </label>
                     <div className="relative">
-                      <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-400" />
+                      <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-700" />
                       <input
                         id="admin_password"
                         name="admin_password"
                         type={showPassword ? "text" : "password"}
                         value={formData.admin_password}
                         onChange={handleInputChange}
-                        className={`pl-8 pr-8 w-full py-2 bg-gray-900/50 border ${
+                        className={`pl-8 pr-8 w-full py-2 bg-gray-50 border ${
                           formErrors.admin_password ? 'border-red-500' : 'border-gray-700'
-                        } rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent text-xs transition-all duration-200`}
+                        } rounded-lg text-black placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent text-xs transition-all duration-200`}
                         placeholder="Create password"
                       />
                       <button
                         type="button"
                         onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-300"
+                        className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-700 hover:text-gray-800"
                       >
                         {showPassword ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
                       </button>
@@ -359,7 +353,7 @@ const RegistrationPage = ({ onRegister }) => {
                       </p>
                     )}
                     {formData.admin_password && (
-                      <div className="text-xs text-gray-400 mt-1">
+                      <div className="text-xs text-gray-700 mt-1">
                         {formData.admin_password.length >= 8 ? '✓ Strong password' : '⚠ Password too short'}
                       </div>
                     )}
@@ -367,26 +361,26 @@ const RegistrationPage = ({ onRegister }) => {
 
                   {/* Confirm Password */}
                   <div className="space-y-1">
-                    <label htmlFor="confirm_password" className="block text-xs font-medium text-gray-300">
+                    <label htmlFor="confirm_password" className="block text-xs font-medium text-gray-800">
                       Confirm Password *
                     </label>
                     <div className="relative">
-                      <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-400" />
+                      <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-700" />
                       <input
                         id="confirm_password"
                         name="confirm_password"
                         type={showConfirmPassword ? "text" : "password"}
                         value={formData.confirm_password}
                         onChange={handleInputChange}
-                        className={`pl-8 pr-8 w-full py-2 bg-gray-900/50 border ${
+                        className={`pl-8 pr-8 w-full py-2 bg-gray-50 border ${
                           formErrors.confirm_password ? 'border-red-500' : 'border-gray-700'
-                        } rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent text-xs transition-all duration-200`}
+                        } rounded-lg text-black placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent text-xs transition-all duration-200`}
                         placeholder="Confirm password"
                       />
                       <button
                         type="button"
                         onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                        className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-300"
+                        className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-700 hover:text-gray-800"
                       >
                         {showConfirmPassword ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
                       </button>
@@ -406,21 +400,21 @@ const RegistrationPage = ({ onRegister }) => {
                 <div className="flex items-start space-x-2">
                   <Key className="h-3 w-3 text-amber-400 shrink-0 mt-0.5" />
                   <div>
-                    <h3 className="text-xs font-medium text-white mb-0.5">Super Admin Password</h3>
-                    <p className="text-xs text-gray-400">
-                      A secure Super Admin Password will be generated. You MUST save it - it's required for password resets and can only be shown once.
+                    <h3 className="text-xs font-medium text-black mb-0.5">Super Admin Password</h3>
+                    <p className="text-xs text-gray-700 italic">
+                      A secure Super Admin Password will be generated. You MUST save it!
                     </p>
                   </div>
                 </div>
               </div>
 
               {/* Important Notice */}
-              <div className="p-2 bg-blue-900/20 border border-blue-800/50 rounded-lg">
+              <div className="p-2 bg-blue-100 border border-blue-800 rounded-lg">
                 <div className="flex items-start space-x-2">
                   <AlertCircle className="h-3 w-3 text-blue-400 shrink-0 mt-0.5" />
                   <div>
-                    <h3 className="text-xs font-medium text-white mb-0.5">Important</h3>
-                    <p className="text-xs text-gray-400">
+                    <h3 className="text-xs font-medium text-black mb-0.5">Important</h3>
+                    <p className="text-xs text-gray-700 italic">
                       One-time registration. Keep all credentials secure.
                     </p>
                   </div>
@@ -457,11 +451,11 @@ const RegistrationPage = ({ onRegister }) => {
             /* Super Admin Password Display Section */
             <div className="space-y-4">
               {/* Success Message */}
-              <div className="p-2 bg-green-900/20 border border-green-800/50 rounded-lg">
+              <div className="p-2 bg-green-50 border border-green-800 rounded-lg">
                 <div className="flex items-center">
                   <CheckCircle2 className="h-3 w-3 text-green-400 mr-2" />
                   <div className="flex-1">
-                    <p className="text-green-400 text-xs font-medium">{success}</p>
+                    <p className="text-gray-900 text-xs font-medium">{success}</p>
                     <div className="h-1 w-full bg-green-900/30 rounded-full mt-1 overflow-hidden">
                       <div className="h-full bg-green-500 animate-pulse" style={{ animationDuration: '2s' }}></div>
                     </div>
@@ -475,18 +469,18 @@ const RegistrationPage = ({ onRegister }) => {
                   <div className="p-1 bg-red-500/20 rounded">
                     <Shield className="h-4 w-4 text-red-400" />
                   </div>
-                  <h2 className="text-base font-semibold text-white">SUPER ADMIN PASSWORD</h2>
+                  <h2 className="text-base font-semibold text-black">SUPER ADMIN PASSWORD</h2>
                 </div>
 
-                <div className="p-3 bg-red-900/10 border border-red-800/50 rounded-lg">
+                <div className="p-3 bg-red-50 border border-red-800 rounded-lg">
                   <div className="space-y-3">
                     {/* Critical Warning */}
-                    <div className="p-2 bg-red-900/30 rounded">
+                    <div className="p-2 bg-red-100 rounded">
                       <div className="flex items-start space-x-2">
                         <AlertCircle className="h-3 w-3 text-red-400 shrink-0 mt-0.5" />
                         <div>
-                          <h3 className="text-xs font-medium text-white mb-0.5">⚠️ CRITICAL WARNING</h3>
-                          <p className="text-xs text-gray-300">
+                          <h3 className="text-xs font-medium text-black mb-0.5">CRITICAL WARNING</h3>
+                          <p className="text-xs text-gray-800 italic">
                             This password will only be shown ONCE. You MUST save it in a secure location. 
                             It is REQUIRED for password resets.
                           </p>
@@ -497,10 +491,10 @@ const RegistrationPage = ({ onRegister }) => {
                     {/* Password Display */}
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
-                        <label className="text-xs font-medium text-gray-300">Super Admin Password:</label>
+                        <label className="text-xs font-medium text-gray-800">Super Admin Password:</label>
                         <button
                           onClick={() => setShowSuperAdminPassword(!showSuperAdminPassword)}
-                          className="text-xs text-gray-400 hover:text-gray-300"
+                          className="text-xs text-gray-700 hover:text-gray-800"
                         >
                           {showSuperAdminPassword ? 'Hide' : 'Show'}
                         </button>
@@ -510,21 +504,21 @@ const RegistrationPage = ({ onRegister }) => {
                           type={showSuperAdminPassword ? "text" : "password"}
                           value={superAdminPassword}
                           readOnly
-                          className="w-full py-2 px-3 bg-gray-900/70 border border-red-700 rounded-lg text-white text-sm font-mono tracking-wider"
+                          className="w-full py-2 px-3 bg-gray-50 border border-red-700 rounded-lg text-black text-sm font-mono tracking-wider"
                         />
                         <button
                           onClick={copyToClipboard}
-                          className="absolute right-2 top-1/2 transform -translate-y-1/2 p-1 bg-gray-800 rounded hover:bg-gray-700"
+                          className="absolute right-2 top-1/2 transform -translate-y-1/2 p-1 bg-gray-200 rounded hover:bg-gray-300"
                         >
                           {copied ? (
-                            <Check className="h-3 w-3 text-green-400" />
+                            <Check className="h-3 w-3 text-green-800" />
                           ) : (
-                            <Copy className="h-3 w-3 text-gray-400" />
+                            <Copy className="h-3 w-3 text-gray-700" />
                           )}
                         </button>
                       </div>
                       {copied && (
-                        <p className="text-xs text-green-400">✓ Copied to clipboard</p>
+                        <p className="text-xs text-black">✓ Copied to clipboard</p>
                       )}
                     </div>
                   </div>
@@ -533,8 +527,8 @@ const RegistrationPage = ({ onRegister }) => {
                 {/* Instructions */}
                 <div className="p-2 bg-blue-900/20 border border-blue-800/50 rounded-lg">
                   <div className="space-y-1">
-                    <h3 className="text-xs font-medium text-white">📋 Backup Instructions:</h3>
-                    <ul className="text-xs text-gray-400 space-y-1 pl-1">
+                    <h3 className="text-xs font-medium text-black">📋 Backup Instructions:</h3>
+                    <ul className="text-xs text-gray-800 italic space-y-1 pl-1">
                       <li className="flex items-start">
                         <span className="text-red-400 mr-1">•</span>
                         <span>Copy and save to password manager</span>
@@ -553,8 +547,8 @@ const RegistrationPage = ({ onRegister }) => {
 
                 {/* Completion Button */}
                 <div className="space-y-2">
-                  <div className="p-2 bg-gray-900/50 border border-gray-700 rounded-lg">
-                    <p className="text-xs text-gray-400 text-center">
+                  <div className="p-2 bg-gray-50 border border-gray-700 rounded-lg">
+                    <p className="text-xs text-gray-700 italic text-center">
                       After saving the Super Admin Password, proceed to launch your dashboard.
                     </p>
                   </div>
@@ -583,7 +577,7 @@ const RegistrationPage = ({ onRegister }) => {
         {/* Footer - More Compact */}
         <div className="mt-4 text-center">
           <p className="text-xs text-gray-500">
-            Secure Company Administration System • © {new Date().getFullYear()}
+            Company Administration System • © {new Date().getFullYear()}
           </p>
         </div>
       </div>
