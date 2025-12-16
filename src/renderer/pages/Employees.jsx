@@ -390,7 +390,7 @@ const Employees = () => {
                         <td className="py-4 px-6">
                           <div>
                             <p className="font-medium">{employee.position}</p>
-                            <p className="text-sm text-gray-500">{employee.salary}/year</p>
+                            <p className="text-sm text-gray-500">{employee.salary}/month</p>
                           </div>
                         </td>
                         <td className="py-4 px-6">

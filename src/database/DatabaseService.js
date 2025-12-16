@@ -14,6 +14,7 @@ class DatabaseService {
 
   initializeDatabase() {
     this.createTables();
+    this.migrateDatabase();
   }
 
   createTables() {
@@ -77,6 +78,11 @@ class DatabaseService {
         net_salary REAL NOT NULL,
         status TEXT NOT NULL DEFAULT 'Pending',
         payment_date DATE,
+        cutoff_type TEXT DEFAULT 'Full Month',
+        working_days INTEGER DEFAULT 24,
+        days_present INTEGER DEFAULT 24,
+        daily_rate REAL DEFAULT 0,
+        breakdown TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
         UNIQUE(employee_id, period_start, period_end)
@@ -416,8 +422,9 @@ class DatabaseService {
     const stmt = this.db.prepare(`
       INSERT INTO payroll (
         employee_id, period_start, period_end, basic_salary,
-        allowances, deductions, net_salary, status, payment_date
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        allowances, deductions, net_salary, status, payment_date,
+        cutoff_type, working_days, days_present, daily_rate, breakdown
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const info = stmt.run(
@@ -429,7 +436,12 @@ class DatabaseService {
       payrollData.deductions || 0,
       payrollData.net_salary,
       payrollData.status || 'Pending',
-      payrollData.payment_date || null
+      payrollData.payment_date || null,
+      payrollData.cutoff_type || 'Full Month',
+      payrollData.working_days || 24,
+      payrollData.days_present || 24,
+      payrollData.daily_rate || (payrollData.basic_salary / 24),
+      JSON.stringify(payrollData.breakdown || {})
     );
 
     return { id: info.lastInsertRowid, changes: info.changes };
@@ -441,13 +453,248 @@ class DatabaseService {
       SELECT 
         p.*,
         e.first_name || ' ' || e.last_name as employee_name,
-        e.position
+        e.position,
+        e.salary as monthly_salary,
+        d.name as department_name
       FROM payroll p
       INNER JOIN employees e ON p.employee_id = e.id
+      LEFT JOIN departments d ON e.department_id = d.id
       ORDER BY p.period_end DESC
     `);
     return stmt.all();
   }
+
+  getPayrollSummary(year, month) {
+  try {
+    const startDate = `${year}-${month.toString().padStart(2, '0')}-01`;
+    const endDate = `${year}-${month.toString().padStart(2, '0')}-31`;
+    
+    const stmt = this.db.prepare(`
+      SELECT 
+        p.*,
+        e.first_name || ' ' || e.last_name as employee_name,
+        e.position,
+        e.salary as basic_salary,
+        d.name as department_name
+      FROM payroll p
+      INNER JOIN employees e ON p.employee_id = e.id
+      LEFT JOIN departments d ON e.department_id = d.id
+      WHERE p.period_start >= date(?) AND p.period_end <= date(?)
+      ORDER BY p.period_end DESC, e.last_name
+    `);
+    
+    return stmt.all(startDate, endDate);
+  } catch (error) {
+    console.error('Error getting payroll summary:', error);
+    throw error;
+  }
+}
+
+markPayrollAsPaid(payrollId, paymentDate = null) {
+  try {
+    const date = paymentDate || new Date().toISOString().split('T')[0];
+    const stmt = this.db.prepare(`
+      UPDATE payroll 
+      SET status = 'Paid', payment_date = ?
+      WHERE id = ?
+    `);
+    
+    const info = stmt.run(date, payrollId);
+    return { changes: info.changes };
+  } catch (error) {
+    console.error('Error marking payroll as paid:', error);
+    throw error;
+  }
+}
+
+// Get payroll by employee and period
+getPayrollByEmployeeAndPeriod(employeeId, year, month) {
+  try {
+    const startDate = `${year}-${month.toString().padStart(2, '0')}-01`;
+    const endDate = `${year}-${month.toString().padStart(2, '0')}-31`;
+    
+    const stmt = this.db.prepare(`
+      SELECT * FROM payroll 
+      WHERE employee_id = ? 
+        AND period_start >= date(?) 
+        AND period_end <= date(?)
+    `);
+    
+    return stmt.get(employeeId, startDate, endDate);
+  } catch (error) {
+    console.error('Error getting payroll by employee and period:', error);
+    throw error;
+  }
+}
+
+// Get attendance for specific cutoff period
+getAttendanceForCutoff(year, month, isFirstHalf) {
+  try {
+    const startDate = `${year}-${month.toString().padStart(2, '0')}-${isFirstHalf ? '01' : '11'}`;
+    const endDate = `${year}-${month.toString().padStart(2, '0')}-${isFirstHalf ? '10' : '25'}`;
+    
+    const stmt = this.db.prepare(`
+      SELECT 
+        e.id as employee_id,
+        e.first_name || ' ' || e.last_name as employee_name,
+        e.salary as monthly_salary,
+        COUNT(CASE WHEN a.status = 'Present' THEN 1 END) as days_present,
+        COUNT(CASE WHEN a.status = 'Absent' THEN 1 END) as days_absent,
+        COUNT(CASE WHEN a.status = 'Late' THEN 1 END) as days_late,
+        COUNT(CASE WHEN a.status = 'On Leave' THEN 1 END) as days_leave,
+        COUNT(*) as total_recorded_days
+      FROM employees e
+      LEFT JOIN attendance a ON e.id = a.employee_id 
+        AND date(a.date) BETWEEN date(?) AND date(?)
+      WHERE e.status = 'Active'
+      GROUP BY e.id
+      ORDER BY e.first_name, e.last_name
+    `);
+    
+    return stmt.all(startDate, endDate);
+  } catch (error) {
+    console.error('Error getting attendance for cutoff:', error);
+    throw error;
+  }
+}
+
+// Process bi-monthly payroll
+processBiMonthlyPayroll(payrollData) {
+  try {
+    const stmt = this.db.prepare(`
+      INSERT INTO payroll (
+        employee_id, period_start, period_end, basic_salary,
+        allowances, deductions, net_salary, status, payment_date,
+        cutoff_type, working_days, days_present, daily_rate, breakdown
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const info = stmt.run(
+      payrollData.employee_id,
+      payrollData.period_start,
+      payrollData.period_end,
+      payrollData.basic_salary,
+      payrollData.allowances || 0,
+      payrollData.deductions || 0,
+      payrollData.net_salary,
+      payrollData.status || 'Pending',
+      payrollData.payment_date || null,
+      payrollData.cutoff_type || 'First Half',
+      payrollData.working_days || 12,
+      payrollData.days_present || 12,
+      payrollData.daily_rate || 0,
+      JSON.stringify(payrollData.breakdown || {})
+    );
+
+    return { id: info.lastInsertRowid, changes: info.changes };
+  } catch (error) {
+    console.error('Error processing bi-monthly payroll:', error);
+    throw error;
+  }
+}
+
+// Get payroll by cutoff period
+getPayrollByCutoff(year, month, cutoffType) {
+  try {
+    const startDate = `${year}-${month.toString().padStart(2, '0')}-${cutoffType === 'First Half' ? '01' : '11'}`;
+    const endDate = `${year}-${month.toString().padStart(2, '0')}-${cutoffType === 'First Half' ? '10' : '25'}`;
+    
+    const stmt = this.db.prepare(`
+      SELECT 
+        p.*,
+        e.first_name || ' ' || e.last_name as employee_name,
+        e.position,
+        e.salary as monthly_salary,
+        d.name as department_name
+      FROM payroll p
+      INNER JOIN employees e ON p.employee_id = e.id
+      LEFT JOIN departments d ON e.department_id = d.id
+      WHERE p.period_start = date(?) AND p.period_end = date(?)
+      ORDER BY e.last_name
+    `);
+    
+    const result = stmt.all(startDate, endDate);
+    
+    // Add cutoff_type to results for backward compatibility
+    return result.map(row => ({
+      ...row,
+      cutoff_type: row.cutoff_type || cutoffType
+    }));
+    
+  } catch (error) {
+    console.error('Error getting payroll by cutoff:', error);
+    // Fallback to query without cutoff_type column
+    const startDate = `${year}-${month.toString().padStart(2, '0')}-${cutoffType === 'First Half' ? '01' : '11'}`;
+    const endDate = `${year}-${month.toString().padStart(2, '0')}-${cutoffType === 'First Half' ? '10' : '25'}`;
+    
+    const stmt = this.db.prepare(`
+      SELECT 
+        p.*,
+        e.first_name || ' ' || e.last_name as employee_name,
+        e.position,
+        e.salary as monthly_salary,
+        d.name as department_name
+      FROM payroll p
+      INNER JOIN employees e ON p.employee_id = e.id
+      LEFT JOIN departments d ON e.department_id = d.id
+      WHERE p.period_start = date(?) AND p.period_end = date(?)
+      ORDER BY e.last_name
+    `);
+    
+    const result = stmt.all(startDate, endDate);
+    
+    // Add cutoff_type for backward compatibility
+    return result.map(row => ({
+      ...row,
+      cutoff_type: cutoffType
+    }));
+  }
+}
+
+migrateDatabase() {
+  try {
+    // Check if new columns exist, if not add them
+    const columns = this.db.prepare(`
+      PRAGMA table_info(payroll)
+    `).all();
+    
+    const columnNames = columns.map(col => col.name);
+    
+    // Add cutoff_type if it doesn't exist
+    if (!columnNames.includes('cutoff_type')) {
+      this.db.exec(`ALTER TABLE payroll ADD COLUMN cutoff_type TEXT DEFAULT 'Full Month'`);
+      console.log('Added cutoff_type column to payroll table');
+    }
+    
+    // Add working_days if it doesn't exist
+    if (!columnNames.includes('working_days')) {
+      this.db.exec(`ALTER TABLE payroll ADD COLUMN working_days INTEGER DEFAULT 24`);
+      console.log('Added working_days column to payroll table');
+    }
+    
+    // Add days_present if it doesn't exist
+    if (!columnNames.includes('days_present')) {
+      this.db.exec(`ALTER TABLE payroll ADD COLUMN days_present INTEGER DEFAULT 24`);
+      console.log('Added days_present column to payroll table');
+    }
+    
+    // Add daily_rate if it doesn't exist
+    if (!columnNames.includes('daily_rate')) {
+      this.db.exec(`ALTER TABLE payroll ADD COLUMN daily_rate REAL DEFAULT 0`);
+      console.log('Added daily_rate column to payroll table');
+    }
+    
+    // Add breakdown if it doesn't exist
+    if (!columnNames.includes('breakdown')) {
+      this.db.exec(`ALTER TABLE payroll ADD COLUMN breakdown TEXT`);
+      console.log('Added breakdown column to payroll table');
+    }
+    
+    console.log('Database migration completed successfully');
+  } catch (error) {
+    console.error('Error during database migration:', error);
+  }
+}
 
   // Generic query methods for IPC
   query(sql, params = []) {

@@ -18,13 +18,14 @@ function createWindow() {
 
   // Create the browser window
   mainWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
+    width: 1920,
+    height: 1080,
     minWidth: 1200,
     minHeight: 800,
     show: false,
     backgroundColor: '#FFFFFF',
     webPreferences: {
+      zoomFactor: 0.7,
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
@@ -458,6 +459,67 @@ ipcMain.handle('payroll:get-all', async () => {
     return dbService.getAllPayroll();
   } catch (error) {
     console.error('Error getting all payroll:', error);
+    return [];
+  }
+});
+
+ipcMain.handle('payroll:get-summary', async (event, year, month) => {
+  try {
+    return dbService.getPayrollSummary(year, month);
+  } catch (error) {
+    console.error('Error getting payroll summary:', error);
+    return [];
+  }
+});
+
+// Mark payroll as paid
+ipcMain.handle('payroll:mark-paid', async (event, payrollId, paymentDate) => {
+  try {
+    return dbService.markPayrollAsPaid(payrollId, paymentDate);
+  } catch (error) {
+    console.error('Error marking payroll as paid:', error);
+    throw error;
+  }
+});
+
+// Get payroll by employee and period
+ipcMain.handle('payroll:get-by-employee-period', async (event, employeeId, year, month) => {
+  try {
+    return dbService.getPayrollByEmployeeAndPeriod(employeeId, year, month);
+  } catch (error) {
+    console.error('Error getting payroll by employee and period:', error);
+    return null;
+  }
+});
+
+// main.js - Add these IPC handlers for bi-monthly payroll
+
+// Get attendance for cutoff period
+ipcMain.handle('attendance:get-cutoff', async (event, year, month, isFirstHalf) => {
+  try {
+    return dbService.getAttendanceForCutoff(year, month, isFirstHalf);
+  } catch (error) {
+    console.error('Error getting cutoff attendance:', error);
+    return [];
+  }
+});
+
+// Process bi-monthly payroll
+ipcMain.handle('payroll:process-bi-monthly', async (event, payrollData) => {
+  try {
+    return dbService.processBiMonthlyPayroll(payrollData);
+  } catch (error) {
+    console.error('Error processing bi-monthly payroll:', error);
+    throw error;
+  }
+});
+
+// Get payroll by cutoff period
+ipcMain.handle('payroll:get-by-cutoff', async (event, year, month, cutoffType) => {
+  try {
+    return dbService.getPayrollByCutoff(year, month, cutoffType);
+  } catch (error) {
+    console.error('Error getting payroll by cutoff:', error);
     return [];
   }
 });

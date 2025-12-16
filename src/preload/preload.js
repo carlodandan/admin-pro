@@ -48,7 +48,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Payroll operations
   processPayroll: (payrollData) => ipcRenderer.invoke('payroll:process', payrollData),
   getAllPayroll: () => ipcRenderer.invoke('payroll:get-all'),
-  
+  getPayrollSummary: (year, month) => ipcRenderer.invoke('payroll:get-summary', year, month),
+  markPayrollAsPaid: (payrollId, paymentDate) => ipcRenderer.invoke('payroll:mark-paid', payrollId, paymentDate),
+  getPayrollByEmployeePeriod: (employeeId, year, month) => ipcRenderer.invoke('payroll:get-by-employee-period', employeeId, year, month),
+  getCutoffAttendance: (year, month, isFirstHalf) => ipcRenderer.invoke('attendance:get-cutoff', year, month, isFirstHalf),
+  processBiMonthlyPayroll: (payrollData) => ipcRenderer.invoke('payroll:process-bi-monthly', payrollData),
+  getPayrollByCutoff: (year, month, cutoffType) => ipcRenderer.invoke('payroll:get-by-cutoff', year, month, cutoffType),
+
   // Database operations
   query: (sql, params) => ipcRenderer.invoke('database:query', sql, params),
   execute: (sql, params) => ipcRenderer.invoke('database:execute', sql, params),

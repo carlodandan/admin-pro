@@ -346,7 +346,7 @@ const AddEmployeeModal = ({ isOpen, onClose, onEmployeeAdded }) => {
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Salary (Annual) *
+                      Salary (Monthly) *
                     </label>
                     <div className="relative">
                       <PhilippinePeso className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
@@ -365,7 +365,7 @@ const AddEmployeeModal = ({ isOpen, onClose, onEmployeeAdded }) => {
                     </div>
                     {formData.salary && (
                       <p className="text-xs text-green-600 mt-2">
-                        ≈ {formatCurrency(parseFloat(formData.salary) / 12)} per month
+                        ≈ {formatCurrency(parseFloat(formData.salary) / 24)} per day.
                       </p>
                     )}
                   </div>

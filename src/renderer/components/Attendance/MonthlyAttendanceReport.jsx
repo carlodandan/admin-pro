@@ -20,6 +20,23 @@ const MonthlyAttendanceReport = () => {
     generateReport();
   }, [selectedMonth]);
 
+  // Calculate working days in a month (26 days total, 2 days off = 24 working days)
+  const getWorkingDaysInMonth = (year, month) => {
+    return 24; // Fixed 24 working days per month
+  };
+
+  // Calculate actual working days based on attendance records
+  const calculateWorkingDays = (attendanceData) => {
+    // Count unique days where there's at least one attendance record
+    const uniqueDays = new Set();
+    attendanceData.forEach(record => {
+      if (record.date) {
+        uniqueDays.add(record.date);
+      }
+    });
+    return uniqueDays.size;
+  };
+
   const generateReport = async () => {
     setLoading(true);
     try {
@@ -38,8 +55,8 @@ const MonthlyAttendanceReport = () => {
         const totalLateDays = data.reduce((sum, row) => sum + (row.late_days || 0), 0);
         const totalLeaveDays = data.reduce((sum, row) => sum + (row.leave_days || 0), 0);
         
-        // Get number of working days in the month (assuming 22 working days per month)
-        const workingDaysPerMonth = 22;
+        // Working days per employee in this month
+        const workingDaysPerMonth = getWorkingDaysInMonth(year, month);
         const totalPossibleDays = totalEmployees * workingDaysPerMonth;
         const averageAttendance = totalPossibleDays > 0 
           ? ((totalPresentDays / totalPossibleDays) * 100).toFixed(1) + '%'
@@ -51,7 +68,8 @@ const MonthlyAttendanceReport = () => {
           totalAbsentDays,
           totalLateDays,
           totalLeaveDays,
-          averageAttendance
+          averageAttendance,
+          workingDaysPerMonth
         });
       } else {
         setSummary({
@@ -60,7 +78,8 @@ const MonthlyAttendanceReport = () => {
           totalAbsentDays: 0,
           totalLateDays: 0,
           totalLeaveDays: 0,
-          averageAttendance: '0%'
+          averageAttendance: '0%',
+          workingDaysPerMonth: getWorkingDaysInMonth(year, month)
         });
       }
     } catch (error) {
@@ -79,7 +98,7 @@ const MonthlyAttendanceReport = () => {
 
     try {
       // Convert data to CSV
-      const headers = ['Employee ID', 'Employee Name', 'Department', 'Present Days', 'Absent Days', 'Late Days', 'Leave Days', 'Total Recorded Days', 'Attendance Rate'];
+      const headers = ['Employee ID', 'Employee Name', 'Department', 'Present Days', 'Absent Days', 'Late Days', 'Leave Days', 'Total Recorded Days', 'Working Days Required', 'Attendance Rate'];
       const csvData = reportData.map(row => [
         row.employee_id,
         row.employee_name,
@@ -89,6 +108,7 @@ const MonthlyAttendanceReport = () => {
         row.late_days || 0,
         row.leave_days || 0,
         row.total_recorded_days || 0,
+        summary.workingDaysPerMonth,
         row.total_recorded_days > 0 
           ? `${(((row.present_days || 0) / row.total_recorded_days) * 100).toFixed(1)}%`
           : '0%'
@@ -127,6 +147,9 @@ const MonthlyAttendanceReport = () => {
         <div>
           <h3 className="text-lg font-semibold">Monthly Attendance Report</h3>
           <p className="text-gray-600">Detailed attendance breakdown for {formatDate(selectedMonth)}</p>
+          <p className="text-sm text-gray-500 mt-1">
+            Monthly requirement: 26 calendar days (24 working days + 2 days off)
+          </p>
         </div>
         <div className="flex gap-3">
           <div className="flex items-center gap-2">
@@ -215,6 +238,7 @@ const MonthlyAttendanceReport = () => {
             <div>
               <p className="text-sm text-gray-600">Avg. Attendance</p>
               <p className="text-xl font-bold mt-1">{summary.averageAttendance}</p>
+              <p className="text-xs text-gray-500 mt-1">{summary.workingDaysPerMonth || 24} working days</p>
             </div>
             <div className="w-5 h-5 rounded-full bg-indigo-500 flex items-center justify-center">
               <span className="text-xs text-white">%</span>
@@ -257,7 +281,8 @@ const MonthlyAttendanceReport = () => {
               </p>
             </div>
             <div className="text-sm text-gray-600">
-              Working days this month: <span className="font-semibold">22</span>
+              Working days this month: <span className="font-semibold">{summary.workingDaysPerMonth || 24}</span>
+              <span className="text-xs text-gray-400 ml-2">(26 days with 2 days off)</span>
             </div>
           </div>
           
@@ -272,13 +297,19 @@ const MonthlyAttendanceReport = () => {
                   <th className="py-3 px-4 text-left text-sm font-semibold text-gray-900">Late Days</th>
                   <th className="py-3 px-4 text-left text-sm font-semibold text-gray-900">Leave Days</th>
                   <th className="py-3 px-4 text-left text-sm font-semibold text-gray-900">Total Recorded</th>
+                  <th className="py-3 px-4 text-left text-sm font-semibold text-gray-900">Working Days</th>
                   <th className="py-3 px-4 text-left text-sm font-semibold text-gray-900">Attendance Rate</th>
                 </tr>
               </thead>
               <tbody>
                 {reportData.map((row) => {
-                  const attendanceRate = row.total_recorded_days > 0 
-                    ? ((row.present_days || 0) / row.total_recorded_days) * 100
+                  const workingDaysRequired = summary.workingDaysPerMonth || 24;
+                  const totalRecorded = row.total_recorded_days || 0;
+                  const attendanceRate = totalRecorded > 0 
+                    ? ((row.present_days || 0) / totalRecorded) * 100
+                    : 0;
+                  const workingDaysRate = workingDaysRequired > 0
+                    ? ((row.present_days || 0) / workingDaysRequired) * 100
                     : 0;
                   
                   return (
@@ -325,30 +356,39 @@ const MonthlyAttendanceReport = () => {
                         </div>
                       </td>
                       <td className="py-3 px-4">
-                        <span className="font-medium text-gray-700">{row.total_recorded_days || 0}</span>
+                        <span className="font-medium text-gray-700">{totalRecorded}</span>
                         <div className="text-xs text-gray-500">
-                          of 22 days
+                          recorded days
                         </div>
                       </td>
                       <td className="py-3 px-4">
-                        <div className="flex items-center">
-                          <div className="w-full bg-gray-200 rounded-full h-2.5 mr-3">
-                            <div 
-                              className={`h-2.5 rounded-full ${
-                                attendanceRate >= 90 ? 'bg-green-500' :
-                                attendanceRate >= 75 ? 'bg-yellow-500' :
-                                'bg-red-500'
-                              }`}
-                              style={{ width: `${Math.min(attendanceRate, 100)}%` }}
-                            ></div>
+                        <div className="text-center">
+                          <span className="font-medium text-gray-700">{row.present_days || 0}</span>
+                          <div className="text-xs text-gray-500">
+                            of {workingDaysRequired}
                           </div>
-                          <span className={`font-semibold ${
-                            attendanceRate >= 90 ? 'text-green-600' :
-                            attendanceRate >= 75 ? 'text-yellow-600' :
-                            'text-red-600'
-                          }`}>
-                            {attendanceRate.toFixed(1)}%
-                          </span>
+                        </div>
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="space-y-2">
+                          <div className="flex items-center">
+                            <div className="w-full bg-gray-200 rounded-full h-2.5 mr-3">
+                              <div 
+                                className={`h-2.5 rounded-full ${
+                                  attendanceRate >= 90 ? 'bg-green-500' :
+                                  attendanceRate >= 75 ? 'bg-yellow-500' :
+                                  'bg-red-500'
+                                }`}
+                                style={{ width: `${Math.min(attendanceRate, 100)}%` }}
+                              ></div>
+                            </div>
+                            <span className={`text-xs font-semibold ${attendanceRate >= 90 ? 'text-green-600' : attendanceRate >= 75 ? 'text-yellow-600' : 'text-red-600'}`}>
+                              {attendanceRate.toFixed(1)}%
+                            </span>
+                          </div>
+                          <div className="text-xs text-gray-500 text-center">
+                            Working days: {workingDaysRate.toFixed(1)}%
+                          </div>
                         </div>
                       </td>
                     </tr>
