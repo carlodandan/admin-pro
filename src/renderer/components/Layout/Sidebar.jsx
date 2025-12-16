@@ -8,10 +8,13 @@ import {
   Settings,
   Home,
   Briefcase,
-  Shield
+  Shield,
+  ChevronLeft,
+  ChevronRight,
+  Menu
 } from 'lucide-react';
 
-const Sidebar = ({ isOpen, toggleSidebar }) => {
+const Sidebar = ({ isOpen, toggleSidebar, isCollapsed, toggleCollapse }) => {
   const location = useLocation();
   const currentPath = location.pathname;
 
@@ -31,36 +34,57 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
       {/* Mobile overlay */}
       {isOpen && (
         <div 
-          className="fixed inset-0 z-40 lg:hidden"
+          className="fixed inset-0 z-40 lg:hidden bg-black/50"
           onClick={toggleSidebar}
         />
       )}
 
+      {/* Mobile toggle button (outside sidebar) */}
+      <button
+        onClick={toggleSidebar}
+        className="lg:hidden fixed top-4 left-4 z-50 p-2 rounded-md bg-gray-900 text-white shadow-lg"
+      >
+        <Menu size={24} />
+      </button>
+
       {/* Sidebar */}
       <aside className={`
-        fixed lg:relative lg:flex flex-col
-        inset-y-0 left-0 z-50
-        w-64 bg-linear-to-b from-gray-900 to-gray-800 text-white
-        transform transition-transform duration-200 ease-in-out
+        fixed lg:relative flex flex-col
+        inset-y-0 left-0 z-40
+        bg-linear-to-b from-gray-900 to-gray-800 text-white
+        transform transition-all duration-300 ease-in-out
         ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+        ${isCollapsed ? 'w-20' : 'w-64'}
       `}>
         <div className="flex flex-col h-full">
-          {/* Logo */}
-          <div className="p-6 border-b border-gray-700">
+          {/* Logo and Collapse Toggle */}
+          <div className={`p-6 border-b border-gray-700 ${isCollapsed ? 'flex justify-center' : ''}`}>
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-linear-to-br from-blue-500 to-purple-600 flex items-center justify-center">
-                <Briefcase size={22} />
-              </div>
-              <div>
-                <h1 className="text-xl font-bold">Admin<span className="text-blue-400">Pro</span></h1>
-                <p className="text-gray-400 text-xs mt-1">Company Admin System</p>
-              </div>
+              {!isCollapsed ? (
+                <>
+                  <div className="w-10 h-10 rounded-lg bg-linear-to-br from-blue-500 to-purple-600 flex items-center justify-center">
+                    <Briefcase size={22} />
+                  </div>
+                  <div>
+                    <h1 className="text-xl font-bold">Admin<span className="text-blue-400">Pro</span></h1>
+                    <p className="text-gray-400 text-xs mt-1">Company Admin System</p>
+                  </div>
+                </>
+              ) : (
+                <div className="w-10 h-10 rounded-lg bg-linear-to-br from-blue-500 to-purple-600 flex items-center justify-center">
+                  <Briefcase size={22} />
+                </div>
+              )}
             </div>
           </div>
 
           {/* Navigation */}
-          <nav className="flex-1 p-1.5">
-            <p className="text-xs uppercase text-gray-400 font-semibold mb-4 px-1">Main Menu</p>
+          <nav className="flex-1 p-1.5 overflow-y-auto">
+            {!isCollapsed && (
+              <p className="text-xs uppercase text-gray-400 font-semibold mb-4 px-1">
+                Main Menu
+              </p>
+            )}
             <ul className="space-y-1">
               {navItems.map((item, index) => {
                 const isActive = currentPath === item.path || 
@@ -71,22 +95,38 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
                   <li key={index}>
                     <Link
                       to={item.path}
-                      className={`flex items-center gap-3 p-3 rounded-lg transition-all duration-200 ${
+                      className={`flex items-center gap-3 p-3 rounded-lg transition-all duration-200 group ${
                         isActive 
                           ? 'bg-gray-800 text-white shadow-lg' 
                           : 'hover:bg-gray-800/50 text-gray-300 hover:text-white'
-                      }`}
+                      } ${isCollapsed ? 'justify-center' : ''}`}
                       onClick={() => window.innerWidth < 1024 && toggleSidebar()}
+                      title={isCollapsed ? item.label : ''}
                     >
-                      <div className={`p-1 rounded-md ${isActive ? 'bg-blue-500' : 'bg-gray-700'}`}>
+                      <div className={`p-1 rounded-md flex-shrink-0 ${
+                        isActive ? 'bg-blue-500' : 'bg-gray-700 group-hover:bg-gray-600'
+                      }`}>
                         {item.icon}
                       </div>
-                      <span className="font-sm">{item.label}</span>
+                      {!isCollapsed && (
+                        <span className="font-sm truncate">{item.label}</span>
+                      )}
                     </Link>
                   </li>
                 );
               })}
             </ul>
+                      {/* Collapse Toggle Button */}
+          <div className="hidden lg:flex items-center justify-center p-2 border-b border-gray-700">
+            <button
+              onClick={toggleCollapse}
+              className="p-2 rounded-lg hover:bg-gray-800 transition-colors duration-200"
+              title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            >
+              {isCollapsed ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
+            </button>
+          </div>
+
           </nav>
         </div>
       </aside>
