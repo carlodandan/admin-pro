@@ -143,7 +143,7 @@ class DashboardService {
   // Get recent activities (simulated)
   static getRecentActivities(employees) {
     const actions = [
-      'added new employee',
+      'added as new employee',
       'updated profile',
       'approved leave request',
       'processed payroll',
