@@ -119,7 +119,7 @@ const RegistrationPage = ({ onRegister }) => {
   try {
     // Generate super admin password in frontend
     const generatedPassword = generateSuperAdminPassword();
-    setSuperAdminPassword(generatedPassword); // Store for display
+    setSuperAdminPassword(generatedPassword);
 
     const registrationData = {
       company_name: formData.company_name,
@@ -129,7 +129,7 @@ const RegistrationPage = ({ onRegister }) => {
       admin_name: formData.admin_name,
       admin_email: formData.admin_email,
       admin_password: formData.admin_password,
-      super_admin_password: generatedPassword // Send to backend
+      super_admin_password: generatedPassword
     };
 
     const result = await onRegister(registrationData);
@@ -174,7 +174,7 @@ const RegistrationPage = ({ onRegister }) => {
                       Company Name *
                     </label>
                     <div className="relative">
-                      <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-700" />
+                      <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-700" />
                       <input
                         id="company_name"
                         name="company_name"
@@ -188,7 +188,7 @@ const RegistrationPage = ({ onRegister }) => {
                       />
                       {formErrors.company_name && (
                         <p className="text-sm text-red-400 flex items-center mt-1">
-                          <AlertCircle className="h-3 w-3 mr-1" />
+                          <AlertCircle className="h-4 w-4 mr-1" />
                           {formErrors.company_name}
                         </p>
                       )}
@@ -201,7 +201,7 @@ const RegistrationPage = ({ onRegister }) => {
                       Company Email *
                     </label>
                     <div className="relative">
-                      <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-700" />
+                      <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-700" />
                       <input
                         id="company_email"
                         name="company_email"
@@ -216,7 +216,7 @@ const RegistrationPage = ({ onRegister }) => {
                     </div>
                     {formErrors.company_email && (
                       <p className="text-sm text-red-400 flex items-center mt-1">
-                        <AlertCircle className="h-3 w-3 mr-1" />
+                        <AlertCircle className="h-4 w-4 mr-1" />
                         {formErrors.company_email}
                       </p>
                     )}
@@ -228,7 +228,7 @@ const RegistrationPage = ({ onRegister }) => {
                       Company Address
                     </label>
                     <div className="relative">
-                      <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-700" />
+                      <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-700" />
                       <input
                         id="company_address"
                         name="company_address"
@@ -247,7 +247,7 @@ const RegistrationPage = ({ onRegister }) => {
                       Company Phone
                     </label>
                     <div className="relative">
-                      <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-700" />
+                      <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-700" />
                       <input
                         id="company_phone"
                         name="company_phone"
@@ -275,7 +275,7 @@ const RegistrationPage = ({ onRegister }) => {
                       Full Name *
                     </label>
                     <div className="relative">
-                      <User className="absolute left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-700" />
+                      <User className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-700" />
                       <input
                         id="admin_name"
                         name="admin_name"
@@ -290,7 +290,7 @@ const RegistrationPage = ({ onRegister }) => {
                     </div>
                     {formErrors.admin_name && (
                       <p className="text-sm text-red-400 flex items-center mt-1">
-                        <AlertCircle className="h-3 w-3 mr-1" />
+                        <AlertCircle className="h-4 w-4 mr-1" />
                         {formErrors.admin_name}
                       </p>
                     )}
@@ -302,7 +302,7 @@ const RegistrationPage = ({ onRegister }) => {
                       Email Address *
                     </label>
                     <div className="relative">
-                      <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-700" />
+                      <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-700" />
                       <input
                         id="admin_email"
                         name="admin_email"
@@ -317,7 +317,7 @@ const RegistrationPage = ({ onRegister }) => {
                     </div>
                     {formErrors.admin_email && (
                       <p className="text-sm text-red-400 flex items-center mt-1">
-                        <AlertCircle className="h-3 w-3 mr-1" />
+                        <AlertCircle className="h-4 w-4 mr-1" />
                         {formErrors.admin_email}
                       </p>
                     )}
@@ -329,7 +329,7 @@ const RegistrationPage = ({ onRegister }) => {
                       Password *
                     </label>
                     <div className="relative">
-                      <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-700" />
+                      <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-700" />
                       <input
                         id="admin_password"
                         name="admin_password"
@@ -346,12 +346,12 @@ const RegistrationPage = ({ onRegister }) => {
                         onClick={() => setShowPassword(!showPassword)}
                         className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-700 hover:text-gray-800"
                       >
-                        {showPassword ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                       </button>
                     </div>
                     {formErrors.admin_password && (
                       <p className="text-sm text-red-400 flex items-center mt-1">
-                        <AlertCircle className="h-3 w-3 mr-1" />
+                        <AlertCircle className="h-4 w-4 mr-1" />
                         {formErrors.admin_password}
                       </p>
                     )}
@@ -368,7 +368,7 @@ const RegistrationPage = ({ onRegister }) => {
                       Confirm Password *
                     </label>
                     <div className="relative">
-                      <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-700" />
+                      <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-700" />
                       <input
                         id="confirm_password"
                         name="confirm_password"
@@ -385,12 +385,12 @@ const RegistrationPage = ({ onRegister }) => {
                         onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                         className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-700 hover:text-gray-800"
                       >
-                        {showConfirmPassword ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                        {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                       </button>
                     </div>
                     {formErrors.confirm_password && (
                       <p className="text-sm text-red-400 flex items-center mt-1">
-                        <AlertCircle className="h-3 w-3 mr-1" />
+                        <AlertCircle className="h-4 w-4 mr-1" />
                         {formErrors.confirm_password}
                       </p>
                     )}
@@ -401,7 +401,7 @@ const RegistrationPage = ({ onRegister }) => {
               {/* Super Admin Password Notice */}
               <div className="p-2 bg-amber-900/20 border border-amber-800/50 rounded-lg">
                 <div className="flex items-start space-x-2">
-                  <Key className="h-3 w-3 text-amber-400 shrink-0 mt-0.5" />
+                  <Key className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
                   <div>
                     <h3 className="text-sm font-medium mb-2 text-black mb-0.5">Super Admin Password</h3>
                     <p className="text-sm text-gray-700 italic">
@@ -414,7 +414,7 @@ const RegistrationPage = ({ onRegister }) => {
               {/* Important Notice */}
               <div className="p-2 bg-blue-100 border border-blue-800 rounded-lg">
                 <div className="flex items-start space-x-2">
-                  <AlertCircle className="h-3 w-3 text-blue-400 shrink-0 mt-0.5" />
+                  <AlertCircle className="h-4 w-4 text-blue-400 shrink-0 mt-0.5" />
                   <div>
                     <h3 className="text-sm font-medium mb-2 text-black mb-0.5">Important</h3>
                     <p className="text-sm text-gray-700 italic">
@@ -428,7 +428,7 @@ const RegistrationPage = ({ onRegister }) => {
               {error && (
                 <div className="p-2 bg-red-900/20 border border-red-800/50 rounded-lg">
                   <p className="text-red-400 text-sm flex items-center">
-                    <AlertCircle className="h-3 w-3 mr-1" />
+                    <AlertCircle className="h-4 w-4 mr-1" />
                     {error}
                   </p>
                 </div>
@@ -456,7 +456,7 @@ const RegistrationPage = ({ onRegister }) => {
               {/* Success Message */}
               <div className="p-2 bg-green-50 border border-green-800 rounded-lg">
                 <div className="flex items-center">
-                  <CheckCircle2 className="h-3 w-3 text-green-400 mr-2" />
+                  <CheckCircle2 className="h-4 w-4 text-green-400 mr-2" />
                   <div className="flex-1">
                     <p className="text-gray-900 text-sm font-medium mb-2">{success}</p>
                     <div className="h-1 w-full bg-green-900/30 rounded-full mt-1 overflow-hidden">
@@ -480,7 +480,7 @@ const RegistrationPage = ({ onRegister }) => {
                     {/* Critical Warning */}
                     <div className="p-2 bg-red-100 rounded">
                       <div className="flex items-start space-x-2">
-                        <AlertCircle className="h-3 w-3 text-red-400 shrink-0 mt-0.5" />
+                        <AlertCircle className="h-4 w-4 text-red-400 shrink-0 mt-0.5" />
                         <div>
                           <h3 className="text-sm font-medium mb-2 text-black mb-0.5">CRITICAL WARNING</h3>
                           <p className="text-sm text-gray-800 italic">
@@ -514,9 +514,9 @@ const RegistrationPage = ({ onRegister }) => {
                           className="absolute right-2 top-1/2 transform -translate-y-1/2 p-1 bg-gray-200 rounded hover:bg-gray-300"
                         >
                           {copied ? (
-                            <Check className="h-3 w-3 text-green-800" />
+                            <Check className="h-4 w-4 text-green-800" />
                           ) : (
-                            <Copy className="h-3 w-3 text-gray-700" />
+                            <Copy className="h-4 w-4 text-gray-700" />
                           )}
                         </button>
                       </div>
@@ -559,7 +559,7 @@ const RegistrationPage = ({ onRegister }) => {
                     onClick={() => window.location.href = '/dashboard'}
                     className="w-full flex justify-center items-center py-2.5 px-4 border border-transparent rounded-lg font-medium text-white bg-linear-to-r from-green-500 to-blue-600 hover:from-green-600 hover:to-blue-700 focus:outline-none focus:ring-1 focus:ring-green-500 focus:ring-offset-1 focus:ring-offset-gray-800 transition-all duration-200 text-sm"
                   >
-                    <CheckCircle2 className="h-3 w-3 mr-2" />
+                    <CheckCircle2 className="h-4 w-4 mr-2" />
                     I have saved the password - Launch Dashboard
                   </button>
                 </div>

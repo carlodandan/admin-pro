@@ -205,8 +205,8 @@ ipcMain.handle('auth:backup-database', async () => {
 // Change password
 ipcMain.handle('auth:change-password', async (event, userId, currentPassword, newPassword) => {
   try {
-    const result = authService.changePassword(userId, currentPassword, newPassword);
-    return { success: true, data: result };
+    const result = await authService.changePassword(userId, currentPassword, newPassword);
+    return result;
   } catch (error) {
     console.error('Error changing password:', error);
     return { success: false, error: error.message };
@@ -262,7 +262,7 @@ ipcMain.handle('auth:is-registered', async (event) => {
 ipcMain.handle('auth:login', async (event, email, password) => {
   try {
     console.log('Login attempt for:', email);
-    const result = authService.verifyAdminLogin(email, password);
+    const result = await authService.verifyAdminLogin(email, password);
     return result;
   } catch (error) {
     console.error('Error during login:', error);
@@ -270,14 +270,11 @@ ipcMain.handle('auth:login', async (event, email, password) => {
   }
 });
 
-// Register system (duplicate - removed since 'auth:register' already exists)
-// ipcMain.handle('register-system', async (event, registrationData) => { ... }
-
-// Store registration
+// Register system
 ipcMain.handle('auth:register', async (event, registrationData) => {
   try {
     console.log('Registration request received');
-    const result = authService.storeRegistration(registrationData);
+    const result = await authService.storeRegistration(registrationData);
     return { success: true, data: result };
   } catch (error) {
     console.error('Registration error:', error);
@@ -289,7 +286,7 @@ ipcMain.handle('auth:register', async (event, registrationData) => {
 ipcMain.handle('auth:reset-admin-password', async (event, email, superAdminPassword, newPassword) => {
   try {
     console.log('Resetting admin password for:', email);
-    const result = authService.resetAdminPassword(email, superAdminPassword, newPassword);
+    const result = await authService.resetAdminPassword(email, superAdminPassword, newPassword);
     return result;
   } catch (error) {
     console.error('Error resetting admin password:', error);
@@ -340,7 +337,7 @@ ipcMain.handle('auth:update-company-info', async (event, companyData) => {
 // Update user
 ipcMain.handle('auth:update-user', async (event, userId, userData) => {
   try {
-    const result = authService.updateUser(userId, userData);
+    const result = await authService.updateUser(userId, userData);
     return { success: true, data: result };
   } catch (error) {
     console.error('Error updating user:', error);
@@ -348,14 +345,11 @@ ipcMain.handle('auth:update-user', async (event, userId, userData) => {
   }
 });
 
-// Verify Super Admin Password (duplicate handler removed - keeping 'auth:verify-super-admin')
-// ipcMain.handle('verify-super-admin-password', async (event, email, password) => { ... }
-
 // Verify Super Admin Password
 ipcMain.handle('auth:verify-super-admin', async (event, email, superAdminPassword) => {
   try {
     console.log('Verifying Super Admin Password for:', email);
-    const result = authService.verifySuperAdminPassword(email, superAdminPassword);
+    const result = await authService.verifySuperAdminPassword(email, superAdminPassword);
     return result;
   } catch (error) {
     console.error('Error verifying super admin password:', error);

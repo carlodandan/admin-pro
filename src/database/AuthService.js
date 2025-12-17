@@ -2,6 +2,7 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const crypto = require('crypto');
 const fs = require('fs');
+const bcrypt = require('bcryptjs');
 const { app } = require('electron');
 
 class AuthService {
@@ -89,7 +90,6 @@ class AuthService {
         admin_name TEXT NOT NULL,
         admin_email TEXT NOT NULL UNIQUE,
         admin_password_hash TEXT NOT NULL,
-        admin_password_salt TEXT NOT NULL,
         license_key TEXT UNIQUE,
         is_registered INTEGER DEFAULT 0,
         registered_at DATETIME,
@@ -107,7 +107,6 @@ class AuthService {
         admin_email TEXT NOT NULL UNIQUE,
         admin_password_hash TEXT NOT NULL,
         super_admin_password_hash TEXT NOT NULL,
-        super_admin_password_plaintext_hash TEXT NOT NULL,
         registration_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         last_reset_date TIMESTAMP,
         reset_count INTEGER DEFAULT 0,
@@ -123,7 +122,6 @@ class AuthService {
         username TEXT NOT NULL UNIQUE,
         email TEXT NOT NULL UNIQUE,
         password_hash TEXT NOT NULL,
-        password_salt TEXT NOT NULL,
         full_name TEXT,
         role TEXT DEFAULT 'user',
         is_active INTEGER DEFAULT 1,
@@ -191,26 +189,30 @@ class AuthService {
   }
 
   /**
-   * Generate salt and hash for password (for admin password)
+   * Hash password using bcryptjs
    */
-  hashPassword(password, salt = null) {
-    if (!salt) {
-      salt = crypto.randomBytes(16).toString('hex');
+  async hashPassword(password) {
+    try {
+      // Generate salt and hash with bcrypt (10 rounds)
+      const salt = await bcrypt.genSalt(10);
+      const hash = await bcrypt.hash(password, salt);
+      return hash;
+    } catch (error) {
+      console.error('Error hashing password:', error);
+      throw error;
     }
-    
-    const hash = crypto
-      .pbkdf2Sync(password, salt, 1000, 64, 'sha512')
-      .toString('hex');
-    
-    return { salt, hash };
   }
 
   /**
-   * Verify password against stored hash
+   * Verify password using bcryptjs
    */
-  verifyPassword(password, hash, salt) {
-    const { hash: computedHash } = this.hashPassword(password, salt);
-    return computedHash === hash;
+  async verifyPassword(password, hash) {
+    try {
+      return await bcrypt.compare(password, hash);
+    } catch (error) {
+      console.error('Error verifying password:', error);
+      return false;
+    }
   }
 
   /**
@@ -234,7 +236,7 @@ class AuthService {
   /**
    * Store initial registration information WITH Generated Super Admin Password
    */
-  storeRegistration(registrationData) {
+  async storeRegistration(registrationData) {
     try {
       // Check if already registered
       if (this.isSystemRegistered()) {
@@ -253,8 +255,8 @@ class AuthService {
         throw new Error('Admin email already exists');
       }
 
-      // Hash the admin password
-      const { salt, hash } = this.hashPassword(registrationData.admin_password);
+      // Hash the admin password using bcrypt
+      const adminPasswordHash = await this.hashPassword(registrationData.admin_password);
 
       // Generate a simple license key
       const licenseKey = this.generateLicenseKey();
@@ -264,8 +266,8 @@ class AuthService {
       
       console.log('Generated Super Admin Password:', superAdminPassword);
 
-      // Encrypt Super Admin Password with installation-specific key
-      const encryptedSuperAdmin = this.encryptPassword(superAdminPassword);
+      // Hash Super Admin Password with bcrypt
+      const superAdminPasswordHash = await this.hashPassword(superAdminPassword);
 
       // Start transaction
       this.db.exec('BEGIN TRANSACTION');
@@ -281,11 +283,10 @@ class AuthService {
             admin_name,
             admin_email,
             admin_password_hash,
-            admin_password_salt,
             license_key,
             is_registered,
             registered_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
 
         const now = new Date().toISOString();
@@ -296,17 +297,11 @@ class AuthService {
           registrationData.company_email,
           registrationData.admin_name,
           registrationData.admin_email,
-          hash,
-          salt,
+          adminPasswordHash,
           licenseKey,
           1, // Mark as registered
           now
         );
-
-        // Also store a hash of the plaintext for verification without decryption
-        const superAdminHash = crypto.createHash('sha256')
-          .update(superAdminPassword)
-          .digest('hex');
 
         // Store in registration_credentials table
         const credStmt = this.db.prepare(`
@@ -315,22 +310,20 @@ class AuthService {
             company_email,
             admin_email,
             admin_password_hash,
-            super_admin_password_hash,
-            super_admin_password_plaintext_hash
-          ) VALUES (?, ?, ?, ?, ?, ?)
+            super_admin_password_hash
+          ) VALUES (?, ?, ?, ?, ?)
         `);
 
         credStmt.run(
           registrationData.company_name,
           registrationData.company_email,
           registrationData.admin_email,
-          hash,
-          JSON.stringify(encryptedSuperAdmin),
-          superAdminHash
+          adminPasswordHash,
+          superAdminPasswordHash
         );
 
         // Create the admin user account
-        this.createAdminUser(
+        await this.createAdminUser(
           result.lastInsertRowid,
           registrationData.admin_email,
           registrationData.admin_password,
@@ -365,11 +358,11 @@ class AuthService {
   /**
    * Verify Super Admin Password for password reset
    */
-  verifySuperAdminPassword(email, superAdminPassword) {
+  async verifySuperAdminPassword(email, superAdminPassword) {
     try {
       // Find the registration credentials
       const stmt = this.db.prepare(`
-        SELECT super_admin_password_hash, super_admin_password_plaintext_hash
+        SELECT super_admin_password_hash
         FROM registration_credentials
         WHERE admin_email = ?
       `);
@@ -380,31 +373,14 @@ class AuthService {
         return { success: false, error: 'No registration found for this email' };
       }
 
-      // Method 1: Verify using hash (faster, doesn't require decryption)
-      const providedHash = crypto.createHash('sha256')
-        .update(superAdminPassword)
-        .digest('hex');
+      // Verify using bcrypt
+      const isValid = await this.verifyPassword(superAdminPassword, result.super_admin_password_hash);
       
-      if (providedHash === result.super_admin_password_plaintext_hash) {
+      if (isValid) {
         return { 
           success: true, 
           message: 'Super Admin Password verified successfully' 
         };
-      }
-
-      // Method 2: Fallback to decryption verification
-      try {
-        const encryptedData = JSON.parse(result.super_admin_password_hash);
-        const storedPassword = this.decryptPassword(encryptedData);
-        
-        if (storedPassword === superAdminPassword) {
-          return { 
-            success: true, 
-            message: 'Super Admin Password verified successfully' 
-          };
-        }
-      } catch (decryptError) {
-        console.warn('Decryption verification failed:', decryptError);
       }
 
       return { 
@@ -420,27 +396,26 @@ class AuthService {
   /**
    * Reset admin password using Super Admin Password
    */
-  resetAdminPassword(email, superAdminPassword, newPassword) {
+  async resetAdminPassword(email, superAdminPassword, newPassword) {
     try {
       // First verify Super Admin Password
-      const verification = this.verifySuperAdminPassword(email, superAdminPassword);
+      const verification = await this.verifySuperAdminPassword(email, superAdminPassword);
       if (!verification.success) {
         return verification;
       }
 
-      // Now update the admin password in both tables
-      const { salt, hash } = this.hashPassword(newPassword);
+      // Hash the new password
+      const newPasswordHash = await this.hashPassword(newPassword);
 
       // Update registrations table
       const updateRegStmt = this.db.prepare(`
         UPDATE registrations 
-        SET admin_password_hash = ?, admin_password_salt = ?, updated_at = ?
+        SET admin_password_hash = ?, updated_at = ?
         WHERE admin_email = ?
       `);
 
       updateRegStmt.run(
-        hash,
-        salt,
+        newPasswordHash,
         new Date().toISOString(),
         email
       );
@@ -453,7 +428,7 @@ class AuthService {
       `);
 
       updateCredStmt.run(
-        hash,
+        newPasswordHash,
         new Date().toISOString(),
         email
       );
@@ -461,11 +436,11 @@ class AuthService {
       // Update users table if the user exists there
       const updateUserStmt = this.db.prepare(`
         UPDATE users 
-        SET password_hash = ?, password_salt = ?
+        SET password_hash = ?
         WHERE email = ?
       `);
 
-      updateUserStmt.run(hash, salt, email);
+      updateUserStmt.run(newPasswordHash, email);
 
       return {
         success: true,
@@ -481,9 +456,9 @@ class AuthService {
   /**
    * Create admin user account after registration
    */
-  createAdminUser(registrationId, email, password, fullName) {
+  async createAdminUser(registrationId, email, password, fullName) {
     try {
-      const { salt, hash } = this.hashPassword(password);
+      const passwordHash = await this.hashPassword(password);
       
       const stmt = this.db.prepare(`
         INSERT INTO users (
@@ -491,10 +466,9 @@ class AuthService {
           username,
           email,
           password_hash,
-          password_salt,
           full_name,
           role
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?)
       `);
 
       const username = email.split('@')[0];
@@ -503,8 +477,7 @@ class AuthService {
         registrationId,
         username,
         email,
-        hash,
-        salt,
+        passwordHash,
         fullName,
         'admin'
       );
@@ -559,13 +532,12 @@ class AuthService {
   /**
    * Verify admin login credentials
    */
-  verifyAdminLogin(email, password) {
+  async verifyAdminLogin(email, password) {
     try {
       // First check in registrations table
       const regStmt = this.db.prepare(`
         SELECT 
           admin_password_hash,
-          admin_password_salt,
           admin_name,
           company_name
         FROM registrations 
@@ -576,10 +548,9 @@ class AuthService {
       
       if (registration) {
         // Verify against registration password
-        const isValid = this.verifyPassword(
+        const isValid = await this.verifyPassword(
           password,
-          registration.admin_password_hash,
-          registration.admin_password_salt
+          registration.admin_password_hash
         );
         
         if (isValid) {
@@ -600,7 +571,6 @@ class AuthService {
       const userStmt = this.db.prepare(`
         SELECT 
           password_hash,
-          password_salt,
           full_name,
           role
         FROM users 
@@ -610,10 +580,9 @@ class AuthService {
       const user = userStmt.get(email);
       
       if (user) {
-        const isValid = this.verifyPassword(
+        const isValid = await this.verifyPassword(
           password,
-          user.password_hash,
-          user.password_salt
+          user.password_hash
         );
         
         if (isValid) {
@@ -693,6 +662,109 @@ class AuthService {
     } catch (error) {
       console.error('Error resetting registration:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Get all users
+   */
+  getAllUsers() {
+    try {
+      const stmt = this.db.prepare(`
+        SELECT id, username, email, full_name, role, is_active, last_login, created_at
+        FROM users
+        ORDER BY created_at DESC
+      `);
+      return stmt.all();
+    } catch (error) {
+      console.error('Error getting all users:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Update user
+   */
+  async updateUser(userId, userData) {
+    try {
+      let passwordUpdate = '';
+      let params = [];
+      
+      if (userData.password) {
+        // Hash the new password
+        const passwordHash = await this.hashPassword(userData.password);
+        passwordUpdate = 'password_hash = ?, ';
+        params.push(passwordHash);
+      }
+      
+      const stmt = this.db.prepare(`
+        UPDATE users 
+        SET ${passwordUpdate}
+            full_name = ?,
+            role = ?,
+            is_active = ?
+        WHERE id = ?
+      `);
+      
+      params.push(
+        userData.full_name,
+        userData.role,
+        userData.is_active ? 1 : 0,
+        userId
+      );
+      
+      const result = stmt.run(...params);
+      
+      return {
+        success: true,
+        rowsAffected: result.changes
+      };
+    } catch (error) {
+      console.error('Error updating user:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Change password
+   */
+  async changePassword(userId, currentPassword, newPassword) {
+    try {
+      // First get the current password hash
+      const stmt = this.db.prepare(`
+        SELECT password_hash FROM users WHERE id = ?
+      `);
+      
+      const user = stmt.get(userId);
+      
+      if (!user) {
+        return { success: false, error: 'User not found' };
+      }
+      
+      // Verify current password
+      const isValid = await this.verifyPassword(currentPassword, user.password_hash);
+      
+      if (!isValid) {
+        return { success: false, error: 'Current password is incorrect' };
+      }
+      
+      // Hash the new password
+      const newPasswordHash = await this.hashPassword(newPassword);
+      
+      // Update password
+      const updateStmt = this.db.prepare(`
+        UPDATE users SET password_hash = ? WHERE id = ?
+      `);
+      
+      updateStmt.run(newPasswordHash, userId);
+      
+      return {
+        success: true,
+        message: 'Password changed successfully'
+      };
+    } catch (error) {
+      console.error('Error changing password:', error);
+      return { success: false, error: 'Failed to change password' };
     }
   }
 }
