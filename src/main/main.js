@@ -1,11 +1,23 @@
-import { app, BrowserWindow, Menu, ipcMain } from 'electron';
+import { app, BrowserWindow, Menu, ipcMain, dialog, clipboard } from 'electron';
 import path from 'node:path';
 import DatabaseService from '../database/DatabaseService';
 import AuthService from '../database/AuthService';
+import fs from 'fs';
 
 let mainWindow;
 let dbService;
 let authService;
+
+// Read package.json to get version
+const packageJsonPath = path.join(__dirname, '../../package.json');
+let appVersion = '1.0.0';
+
+try {
+  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+  appVersion = packageJson.version || '1.0.0';
+} catch (error) {
+  console.error('Failed to read package.json:', error);
+}
 
 if (require('electron-squirrel-startup')) app.quit();
 
@@ -108,6 +120,13 @@ function createMenu() {
       label: 'Help',
       submenu: [
         {
+          label: 'App Version',
+          click: () => {
+            showVersionDialog();
+          }
+        },
+        { type: 'separator' },
+        {
           label: 'Documentation',
           click: async () => {
             const { shell } = require('electron');
@@ -127,6 +146,26 @@ function createMenu() {
 
   const menu = Menu.buildFromTemplate(template);
   Menu.setApplicationMenu(menu);
+}
+
+// Function to show version dialog
+function showVersionDialog() {
+  const buttons = ['OK', 'Copy Version'];
+  
+  dialog.showMessageBox(mainWindow, {
+    type: 'info',
+    title: 'Admin Pro - Version Information',
+    message: 'Admin Pro - Admin Management System',
+    detail: `Version: ${appVersion}\nElectron: ${process.versions.electron}\nNode.js: ${process.versions.node}\nChromium: ${process.versions.chrome}\nPlatform: ${process.platform} ${process.arch}`,
+    buttons: buttons,
+    defaultId: 0,
+    cancelId: 0,
+    icon: path.join(__dirname, '../../icons/adminpro.ico')
+  }).then((result) => {
+    if (result.response === 1) {
+      clipboard.writeText(`Admin Pro v${appVersion}`);
+    }
+  });
 }
 
 // Electron app events
