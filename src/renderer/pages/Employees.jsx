@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Filter, Download, Search, MoreVertical, Eye, Edit, Mail, Phone, UserPlus, Users, Calendar, CreditCard, Loader2 } from 'lucide-react';
-import AddEmployeeModal from '../components/Employees/AddEmployeeModal';
+import AddEmployee from '../components/Employees/AddEmployee';
 import DeleteEmployee from '../components/Employees/DeleteEmployee'; // Import the new component
 
 const Employees = () => {
@@ -543,7 +543,7 @@ const Employees = () => {
       </div>
 
       {/* Add Employee Modal */}
-      <AddEmployeeModal 
+      <AddEmployee 
         isOpen={showAddModal}
         onClose={() => setShowAddModal(false)}
         onEmployeeAdded={handleEmployeeAdded}

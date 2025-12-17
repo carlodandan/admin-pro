@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Building, Loader2 } from 'lucide-react';
-import AddDepartmentModal from '../components/Department/AddDepartmentModal';
+import AddDepartment from '../components/Department/AddDepartment';
 import DepartmentCard from '../components/Department/DepartmentCard';
 
 const Departments = () => {
@@ -115,7 +115,7 @@ const Departments = () => {
       )}
 
       {/* Add Department Modal */}
-      <AddDepartmentModal
+      <AddDepartment
         showModal={showAddModal}
         setShowModal={setShowAddModal}
         onDepartmentAdded={loadDepartments}

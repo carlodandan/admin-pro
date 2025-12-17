@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Loader2 } from 'lucide-react';
 
-const AddDepartmentModal = ({ showModal, setShowModal, onDepartmentAdded }) => {
+const AddDepartment = ({ showModal, setShowModal, onDepartmentAdded }) => {
   const [newDepartment, setNewDepartment] = useState({ name: '', budget: '' });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState(null);
@@ -127,4 +127,4 @@ const AddDepartmentModal = ({ showModal, setShowModal, onDepartmentAdded }) => {
   );
 };
 
-export default AddDepartmentModal;
+export default AddDepartment;

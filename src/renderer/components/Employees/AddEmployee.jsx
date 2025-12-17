@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, User, Mail, Phone, Briefcase, PhilippinePeso, Calendar, Building, Save, Loader2, AlertCircle } from 'lucide-react';
 
-const AddEmployeeModal = ({ isOpen, onClose, onEmployeeAdded }) => {
+const AddEmployee = ({ isOpen, onClose, onEmployeeAdded }) => {
   const [loading, setLoading] = useState(false);
   const [loadingDepartments, setLoadingDepartments] = useState(true);
   const [error, setError] = useState('');
@@ -464,4 +464,4 @@ const AddEmployeeModal = ({ isOpen, onClose, onEmployeeAdded }) => {
   );
 };
 
-export default AddEmployeeModal;
+export default AddEmployee;

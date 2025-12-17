@@ -13,35 +13,53 @@ const DeleteDepartment = ({ departmentId, departmentName, onDeleteSuccess, onDel
 
     try {
       console.log('Deleting department ID:', departmentId);
-      await window.electronAPI.deleteDepartment(departmentId);
+      
+      // Use setTimeout to prevent blocking the main thread
+      const result = await Promise.race([
+        window.electronAPI.deleteDepartment(departmentId),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Delete operation timed out')), 10000)
+        )
+      ]);
+      
       console.log('Department deleted successfully');
       
-      if (onDeleteSuccess) {
-        onDeleteSuccess(`Department "${departmentName}" deleted successfully!`);
-      }
+      // Use setTimeout for success callback to prevent blocking
+      setTimeout(() => {
+        if (onDeleteSuccess) {
+          onDeleteSuccess(`Department "${departmentName}" deleted successfully!`);
+        }
+      }, 0);
+      
     } catch (error) {
       console.error('Error deleting department:', error);
       const errorMessage = error.message || 'Unknown error occurred';
       
-      if (onDeleteError) {
-        onDeleteError(`Error deleting department: ${errorMessage}`);
-      }
+      // Use setTimeout for error callback to prevent blocking
+      setTimeout(() => {
+        if (onDeleteError) {
+          onDeleteError(`Error deleting department: ${errorMessage}`);
+        }
+      }, 0);
     } finally {
-      setIsDeleting(false);
+      // Ensure we always clean up the deleting state
+      setTimeout(() => {
+        setIsDeleting(false);
+      }, 0);
     }
   };
 
   return (
     <button 
       onClick={handleDelete}
-      className="p-2 hover:bg-gray-100 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+      className="p-2 hover:bg-gray-100 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
       disabled={isDeleting}
       title={`Delete ${departmentName}`}
     >
       {isDeleting ? (
         <Loader2 size={16} className="animate-spin text-red-600" />
       ) : (
-        <Trash2 size={16} className="text-red-600" />
+        <Trash2 size={16} className="text-red-600 hover:text-red-700" />
       )}
     </button>
   );
