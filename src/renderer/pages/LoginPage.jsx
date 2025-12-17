@@ -89,14 +89,14 @@ const LoginPage = ({ onLogin }) => {
         {/* Header with Company Info */}
         <div className="text-center mb-3">
           {companyInfo && (
-            <div className="mb-2 p-4 bg-gray-50 rounded-2xl border border-gray-700">
-              <h1 className="text-xl font-bold text-black mb-2">{companyInfo.company_name}</h1>
-              <p className="text-black text-sm">Company Administration System</p>
-              <p className="text-gray-900 text-xs mt-2">Registered on {new Date(companyInfo.registered_at).toLocaleDateString()}</p>
+            <div className="mb-4 p-6 bg-gray-50 rounded-2xl border border-gray-700">
+              <h1 className="text-3xl font-bold text-black mb-2">{companyInfo.company_name}</h1>
+              <p className="text-black text-md">Company Administration System</p>
+              <p className="text-gray-900 text-sm mt-2">Registered on {new Date(companyInfo.registered_at).toLocaleDateString()}</p>
             </div>
           )}
           
-          <p className="text-gray-900">Sign in to your administrator account</p>
+          <p className="text-gray-900 text-xl my-6">Sign in to your administrator account</p>
         </div>
 
         {/* Login Card */}
@@ -104,7 +104,7 @@ const LoginPage = ({ onLogin }) => {
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Email Input */}
             <div className="space-y-2">
-              <label htmlFor="email" className="block text-sm font-medium text-gray-900">
+              <label htmlFor="email" className="block text-lg font-medium text-gray-900">
                 Email Address
               </label>
               <div className="relative">
@@ -126,12 +126,12 @@ const LoginPage = ({ onLogin }) => {
             {/* Password Input */}
             <div className="space-y-2">
               <div className="flex justify-between items-center">
-                <label htmlFor="password" className="block text-sm font-medium text-gray-900">
+                <label htmlFor="password" className="block text-lg font-medium text-gray-900">
                   Password
                 </label>
                 <Link
                   to="/forgot-password"
-                  className="text-sm text-blue-600 hover:text-blue-300 transition-colors duration-200"
+                  className="text-md text-blue-600 hover:text-blue-300 transition-colors duration-200"
                 >
                   Forgot password?
                 </Link>
@@ -169,7 +169,7 @@ const LoginPage = ({ onLogin }) => {
                 onChange={(e) => setRememberMe(e.target.checked)}
                 className="h-4 w-4 text-blue-500 focus:ring-blue-500 border-gray-700 rounded bg-gray-900"
               />
-              <label htmlFor="remember-me" className="ml-2 block text-sm text-gray-900">
+              <label htmlFor="remember-me" className="ml-2 block text-md text-gray-900">
                 Remember me on this device
               </label>
             </div>
@@ -197,7 +197,7 @@ const LoginPage = ({ onLogin }) => {
             <button
               type="submit"
               disabled={isLoading || !credentials.email || !credentials.password}
-              className="w-full flex justify-center items-center py-4 px-6 border border-transparent rounded-xl font-semibold text-white bg-linear-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] shadow-lg"
+              className="w-full flex justify-center items-center py-4 px-6 my-8 border border-transparent rounded-xl font-semibold text-white bg-linear-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] shadow-lg"
             >
               {isLoading ? (
                 <>
@@ -213,9 +213,9 @@ const LoginPage = ({ onLogin }) => {
           {/* Security Note */}
           <div className="mt-4 pt-3 border-t border-gray-700/50">
             <div className="flex items-start space-x-3">
-              <AlertCircle className="h-5 w-5 text-red-400 shrink-0 mt-0.5" />
+              <AlertCircle className="h-5 w-5 text-red-400 shrink-0 my-4" />
               <div>
-                <p className="text-xs text-gray-800 italic">
+                <p className="text-sm text-gray-800 italic my-4">
                   This system allows only one administrator account. If you've forgotten your password, you'll need to use the Super Admin Password.
                 </p>
               </div>

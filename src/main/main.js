@@ -29,10 +29,11 @@ function createWindow() {
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
       webSecurity: true,
-      sandbox: true
+      sandbox: true,
+      defaultFontSize: 12
     },
     icon: path.join(__dirname, '../../icons/adminpro.ico'),
-    titleBarStyle: 'default'
+    titleBarStyle: 'default',
   });
 
   // Maximize the window automatically

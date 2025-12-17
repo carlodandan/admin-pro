@@ -77,7 +77,7 @@ const OverviewCards = ({ stats }) => {
                 <span className="text-sm text-gray-500 ml-1">from last month</span>
               </div>
             </div>
-            <div className="p-3 bg-white rounded-lg shadow-sm">
+            <div className="h-12 w-12 p-3 bg-white rounded-lg shadow-sm items-center justify-center flex">
               {card.icon}
             </div>
           </div>
