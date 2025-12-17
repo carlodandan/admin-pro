@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Building, Users, PhilippinePeso, Loader2, Edit, Trash2 } from 'lucide-react';
+import AddDepartmentModal from '../components/Department/AddDepartmentModal';
 
 const Departments = () => {
   const [departments, setDepartments] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [newDepartment, setNewDepartment] = useState({ name: '', budget: '' });
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  const [success, setSuccess] = useState('');
 
   useEffect(() => {
     console.log('Departments component mounted, loading data...');
@@ -31,62 +32,26 @@ const Departments = () => {
     }
   };
 
-  const handleAddDepartment = async () => {
-    if (!newDepartment.name.trim() || !newDepartment.budget) {
-      alert('Please fill in all fields');
-      return;
-    }
-
-    const budgetValue = parseFloat(newDepartment.budget);
-    if (isNaN(budgetValue) || budgetValue < 0) {
-      alert('Please enter a valid budget amount');
-      return;
-    }
-
-    setIsSubmitting(true);
-    setError(null);
-
-    try {
-      console.log('Creating department:', newDepartment);
-      const result = await window.electronAPI.createDepartment({
-        name: newDepartment.name.trim(),
-        budget: budgetValue
-      });
-      
-      console.log('Department created result:', result);
-      
-      // Reset form
-      setNewDepartment({ name: '', budget: '' });
-      setShowAddModal(false);
-      
-      // Force a fresh reload
-      await loadDepartments();
-      
-      alert('Department added successfully!');
-    } catch (error) {
-      console.error('Error adding department:', error);
-      const errorMessage = error.message || 'Unknown error occurred';
-      setError(`Error adding department: ${errorMessage}`);
-      alert(`Error adding department: ${errorMessage}`);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
   const handleDeleteDepartment = async (id) => {
     if (!window.confirm('Are you sure you want to delete this department?')) {
       return;
     }
 
+    setDeletingId(id);
+    setError('');
+    setSuccess('');
+
     try {
       console.log('Deleting department ID:', id);
       await window.electronAPI.deleteDepartment(id);
       console.log('Department deleted, reloading list...');
-      await loadDepartments();
-      alert('Department deleted successfully!');
+      setDepartments(prev => prev.filter(dept => dept.id !== id));
+      setSuccess('Department deleted successfully!');
     } catch (error) {
       console.error('Error deleting department:', error);
-      alert(`Error deleting department: ${error.message || 'Unknown error'}`);
+      setError(`Error deleting department: ${error.message || 'Unknown error'}`);
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -101,7 +66,7 @@ const Departments = () => {
 
   const handleEditDepartment = (dept) => {
     // You can implement edit functionality here
-    alert(`Edit functionality for ${dept.name} would go here`);
+    setError(`Edit functionality for ${dept.name} would go here`);
   };
 
   return (
@@ -119,17 +84,13 @@ const Departments = () => {
         </div>
         <button
           onClick={() => setShowAddModal(true)}
-          className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          disabled={isSubmitting}
+          className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
         >
-          {isSubmitting ? (
-            <Loader2 className="h-5 w-5 animate-spin" />
-          ) : (
-            <Plus size={18} />
-          )}
-          {isSubmitting ? 'Adding...' : 'Add Department'}
+          <Plus size={18} />
+          Add Department
         </button>
       </div>
+      
       {/* Departments Grid */}
       {loading ? (
         <div className="flex items-center justify-center p-12">
@@ -158,15 +119,21 @@ const Departments = () => {
                 <div className="flex gap-2">
                   <button 
                     onClick={() => handleEditDepartment(dept)}
-                    className="p-2 hover:bg-gray-100 rounded-lg"
+                    className="p-2 hover:bg-gray-100 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={deletingId === dept.id}
                   >
                     <Edit size={16} className="text-blue-600" />
                   </button>
                   <button 
                     onClick={() => handleDeleteDepartment(dept.id)}
-                    className="p-2 hover:bg-gray-100 rounded-lg"
+                    className="p-2 hover:bg-gray-100 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={deletingId === dept.id}
                   >
-                    <Trash2 size={16} className="text-red-600" />
+                    {deletingId === dept.id ? (
+                      <Loader2 size={16} className="animate-spin text-red-600" />
+                    ) : (
+                      <Trash2 size={16} className="text-red-600" />
+                    )}
                   </button>
                 </div>
               </div>
@@ -205,72 +172,11 @@ const Departments = () => {
       )}
 
       {/* Add Department Modal */}
-      {showAddModal && (
-        <div className="fixed inset-0 bg-gray-950/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl w-full max-w-md">
-            <div className="p-6 border-b border-gray-200">
-              <h2 className="text-l font-bold text-gray-900">Add New Department</h2>
-            </div>
-            
-            <div className="p-6">
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Department Name *
-                  </label>
-                  <input
-                    type="text"
-                    value={newDepartment.name}
-                    onChange={(e) => setNewDepartment({...newDepartment, name: e.target.value})}
-                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="e.g., Engineering"
-                    disabled={isSubmitting}
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Annual Budget *
-                  </label>
-                  <input
-                    type="number"
-                    value={newDepartment.budget}
-                    onChange={(e) => setNewDepartment({...newDepartment, budget: e.target.value})}
-                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="e.g., 500000"
-                    min="0"
-                    step="1000"
-                    disabled={isSubmitting}
-                  />
-                </div>
-              </div>
-              
-              <div className="flex justify-end gap-3 mt-8 pt-6 border-t border-gray-200">
-                <button
-                  onClick={() => {
-                    if (!isSubmitting) {
-                      setShowAddModal(false);
-                      setNewDepartment({ name: '', budget: '' });
-                    }
-                  }}
-                  className="px-6 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  disabled={isSubmitting}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleAddDepartment}
-                  disabled={isSubmitting}
-                  className="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                >
-                  {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {isSubmitting ? 'Adding...' : 'Add Department'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <AddDepartmentModal
+        showModal={showAddModal}
+        setShowModal={setShowAddModal}
+        onDepartmentAdded={loadDepartments}
+      />
     </div>
   );
 };
