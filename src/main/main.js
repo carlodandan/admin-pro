@@ -189,61 +189,7 @@ app.on('activate', () => {
   }
 });
 
-// Store registration
-ipcMain.handle('auth:register', async (event, registrationData) => {
-  try {
-    console.log('Registration request received');
-    const result = authService.storeRegistration(registrationData);
-    return { success: true, data: result };
-  } catch (error) {
-    console.error('Registration error:', error);
-    return { success: false, error: error.message };
-  }
-});
-
-// Get all users
-ipcMain.handle('auth:get-users', async () => {
-  try {
-    const users = authService.getAllUsers();
-    return { success: true, data: users };
-  } catch (error) {
-    console.error('Error getting users:', error);
-    return { success: false, error: error.message };
-  }
-});
-
-// Update user
-ipcMain.handle('auth:update-user', async (event, userId, userData) => {
-  try {
-    const result = authService.updateUser(userId, userData);
-    return { success: true, data: result };
-  } catch (error) {
-    console.error('Error updating user:', error);
-    return { success: false, error: error.message };
-  }
-});
-
-// Change password
-ipcMain.handle('auth:change-password', async (event, userId, currentPassword, newPassword) => {
-  try {
-    const result = authService.changePassword(userId, currentPassword, newPassword);
-    return { success: true, data: result };
-  } catch (error) {
-    console.error('Error changing password:', error);
-    return { success: false, error: error.message };
-  }
-});
-
-// Reset registration (for testing only)
-ipcMain.handle('auth:reset-registration', async () => {
-  try {
-    const result = authService.resetRegistration();
-    return { success: true, data: result };
-  } catch (error) {
-    console.error('Error resetting registration:', error);
-    return { success: false, error: error.message };
-  }
-});
+//  AUTHENTICATION IPC HANDLERS 
 
 // Backup auth database
 ipcMain.handle('auth:backup-database', async () => {
@@ -256,83 +202,13 @@ ipcMain.handle('auth:backup-database', async () => {
   }
 });
 
-// Verify Super Admin Password
-ipcMain.handle('verify-super-admin-password', async (event, email, password) => {
+// Change password
+ipcMain.handle('auth:change-password', async (event, userId, currentPassword, newPassword) => {
   try {
-    const result = authService.verifySuperAdminPassword(email, password);
-    return result;
+    const result = authService.changePassword(userId, currentPassword, newPassword);
+    return { success: true, data: result };
   } catch (error) {
-    console.error('Error verifying super admin password:', error);
-    return { success: false, error: error.message };
-  }
-});
-
-ipcMain.handle('register-system', async (event, registrationData) => {
-  try {
-    console.log('Registration request received');
-    const result = authService.storeRegistration(registrationData);
-    console.log('Registration result:', result);
-    return result; // This will include superAdminPassword
-  } catch (error) {
-    console.error('Error during registration:', error);
-    return { success: false, error: error.message };
-  }
-});
-
-// Check if system is registered
-ipcMain.handle('auth:is-registered', async (event) => {
-  try {
-    const isRegistered = authService.isSystemRegistered();
-    return { success: true, isRegistered };
-  } catch (error) {
-    console.error('Error checking registration:', error);
-    return { success: false, error: error.message };
-  }
-});
-
-// Get registration information
-ipcMain.handle('auth:get-registration-info', async (event) => {
-  try {
-    const info = authService.getRegistrationInfo();
-    return { success: true, data: info };
-  } catch (error) {
-    console.error('Error getting registration info:', error);
-    return { success: false, error: error.message };
-  }
-});
-
-// Verify Super Admin Password
-ipcMain.handle('auth:verify-super-admin', async (event, email, superAdminPassword) => {
-  try {
-    console.log('Verifying Super Admin Password for:', email);
-    const result = authService.verifySuperAdminPassword(email, superAdminPassword);
-    return result;
-  } catch (error) {
-    console.error('Error verifying super admin password:', error);
-    return { success: false, error: error.message };
-  }
-});
-
-// Reset Admin Password
-ipcMain.handle('auth:reset-admin-password', async (event, email, superAdminPassword, newPassword) => {
-  try {
-    console.log('Resetting admin password for:', email);
-    const result = authService.resetAdminPassword(email, superAdminPassword, newPassword);
-    return result;
-  } catch (error) {
-    console.error('Error resetting admin password:', error);
-    return { success: false, error: error.message };
-  }
-});
-
-// User login
-ipcMain.handle('auth:login', async (event, email, password) => {
-  try {
-    console.log('Login attempt for:', email);
-    const result = authService.verifyAdminLogin(email, password);
-    return result;
-  } catch (error) {
-    console.error('Error during login:', error);
+    console.error('Error changing password:', error);
     return { success: false, error: error.message };
   }
 });
@@ -349,325 +225,90 @@ ipcMain.handle('auth:create-user', async (event, userData) => {
   }
 });
 
-
-// IPC Handlers for database operations
-ipcMain.handle('database:query', async (event, sql, params) => {
+// Get all users
+ipcMain.handle('auth:get-users', async () => {
   try {
-    return dbService.query(sql, params);
+    const users = authService.getAllUsers();
+    return { success: true, data: users };
   } catch (error) {
-    console.error('Database query error:', error);
-    throw error;
-  }
-});
-
-ipcMain.handle('database:execute', async (event, sql, params) => {
-  try {
-    return dbService.execute(sql, params);
-  } catch (error) {
-    console.error('Database execute error:', error);
-    throw error;
-  }
-});
-
-ipcMain.handle('employees:get-all', async () => {
-  try {
-    return dbService.getAllEmployees();
-  } catch (error) {
-    console.error('Error getting all employees:', error);
-    return [];
-  }
-});
-
-ipcMain.handle('employees:get-by-id', async (event, id) => {
-  try {
-    return dbService.getEmployeeById(id);
-  } catch (error) {
-    console.error('Error getting employee by id:', error);
-    return null;
-  }
-});
-
-ipcMain.handle('employees:create', async (event, employee) => {
-  try {
-    console.log('Creating employee in main process:', employee);
-    const result = dbService.createEmployee(employee);
-    console.log('Employee created:', result);
-    return result;
-  } catch (error) {
-    console.error('Error creating employee:', error);
-    throw error;
-  }
-});
-
-ipcMain.handle('employees:update', async (event, id, employee) => {
-  try {
-    return dbService.updateEmployee(id, employee);
-  } catch (error) {
-    console.error('Error updating employee:', error);
-    throw error;
-  }
-});
-
-ipcMain.handle('employees:delete', async (event, id) => {
-  try {
-    return dbService.deleteEmployee(id);
-  } catch (error) {
-    console.error('Error deleting employee:', error);
-    throw error;
-  }
-});
-
-ipcMain.handle('attendance:get-today', async () => {
-  try {
-    return dbService.getTodayAttendance();
-  } catch (error) {
-    console.error('Error getting today\'s attendance:', error);
-    return [];
-  }
-});
-
-ipcMain.handle('attendance:record', async (event, attendance) => {
-  try {
-    return dbService.recordAttendance(attendance);
-  } catch (error) {
-    console.error('Error recording attendance:', error);
-    throw error;
-  }
-});
-
-ipcMain.handle('attendance:get-weekly', async () => {
-  try {
-    return dbService.getWeeklyAttendance();
-  } catch (error) {
-    console.error('Error getting weekly attendance:', error);
-    return [];
-  }
-});
-
-// Get today's attendance summary
-ipcMain.handle('attendance:get-today-summary', async () => {
-  try {
-    return dbService.getTodayAttendanceSummary();
-  } catch (error) {
-    console.error('Error getting today\'s attendance summary:', error);
-    return {
-      presentToday: 0,
-      absentToday: 0,
-      lateToday: 0,
-      leaveToday: 0,
-      attendanceRate: '0%'
-    };
-  }
-});
-
-ipcMain.handle('attendance:get-monthly-report', async (event, year, month) => {
-  try {
-    return dbService.getMonthlyAttendanceReport(year, month);
-  } catch (error) {
-    console.error('Error getting monthly attendance report:', error);
-    return [];
-  }
-});
-
-ipcMain.handle('payroll:process', async (event, payrollData) => {
-  try {
-    return dbService.processPayroll(payrollData);
-  } catch (error) {
-    console.error('Error processing payroll:', error);
-    throw error;
-  }
-});
-
-ipcMain.handle('payroll:get-all', async () => {
-  try {
-    return dbService.getAllPayroll();
-  } catch (error) {
-    console.error('Error getting all payroll:', error);
-    return [];
-  }
-});
-
-ipcMain.handle('payroll:get-summary', async (event, year, month) => {
-  try {
-    return dbService.getPayrollSummary(year, month);
-  } catch (error) {
-    console.error('Error getting payroll summary:', error);
-    return [];
-  }
-});
-
-// Mark payroll as paid
-ipcMain.handle('payroll:mark-paid', async (event, payrollId, paymentDate) => {
-  try {
-    return dbService.markPayrollAsPaid(payrollId, paymentDate);
-  } catch (error) {
-    console.error('Error marking payroll as paid:', error);
-    throw error;
-  }
-});
-
-// Get payroll by employee and period
-ipcMain.handle('payroll:get-by-employee-period', async (event, employeeId, year, month) => {
-  try {
-    return dbService.getPayrollByEmployeeAndPeriod(employeeId, year, month);
-  } catch (error) {
-    console.error('Error getting payroll by employee and period:', error);
-    return null;
-  }
-});
-
-// main.js - Add these IPC handlers for bi-monthly payroll
-
-// Get attendance for cutoff period
-ipcMain.handle('attendance:get-cutoff', async (event, year, month, isFirstHalf) => {
-  try {
-    return dbService.getAttendanceForCutoff(year, month, isFirstHalf);
-  } catch (error) {
-    console.error('Error getting cutoff attendance:', error);
-    return [];
-  }
-});
-
-// Process bi-monthly payroll
-ipcMain.handle('payroll:process-bi-monthly', async (event, payrollData) => {
-  try {
-    return dbService.processBiMonthlyPayroll(payrollData);
-  } catch (error) {
-    console.error('Error processing bi-monthly payroll:', error);
-    throw error;
-  }
-});
-
-// Get payroll by cutoff period
-ipcMain.handle('payroll:get-by-cutoff', async (event, year, month, cutoffType) => {
-  try {
-    return dbService.getPayrollByCutoff(year, month, cutoffType);
-  } catch (error) {
-    console.error('Error getting payroll by cutoff:', error);
-    return [];
-  }
-});
-
-// Window control handlers
-ipcMain.on('window:minimize', () => {
-  if (mainWindow) {
-    mainWindow.minimize();
-  }
-});
-
-ipcMain.on('window:maximize', () => {
-  if (mainWindow) {
-    if (mainWindow.isMaximized()) {
-      mainWindow.unmaximize();
-    } else {
-      mainWindow.maximize();
-    }
-  }
-});
-
-ipcMain.on('window:close', () => {
-  if (mainWindow) {
-    mainWindow.close();
-  }
-});
-
-ipcMain.handle('departments:create', async (event, department) => {
-  return new Promise((resolve, reject) => {
-    setImmediate(() => {
-      try {
-        resolve(dbService.createDepartment(department));
-      } catch (error) {
-        console.error('Error creating department:', error);
-        reject(error);
-      }
-    });
-  });
-});
-
-ipcMain.handle('departments:delete', async (event, id) => {
-  return new Promise((resolve, reject) => {
-    setImmediate(() => {
-      try {
-        resolve(dbService.deleteDepartment(id));
-      } catch (error) {
-        console.error('Error deleting department:', error);
-        reject(error);
-      }
-    });
-  });
-});
-
-ipcMain.handle('departments:get-all', async () => {
-  return new Promise((resolve, reject) => {
-    setImmediate(() => {
-      try {
-        resolve(dbService.getAllDepartments());
-      } catch (error) {
-        console.error('Error getting all departments:', error);
-        resolve([]); // safe fallback
-      }
-    });
-  });
-});
-
-
-// Database backup/export
-ipcMain.handle('database:backup', async () => {
-  try {
-    const userDataPath = app.getPath('userData');
-    const dbPath = path.join(userDataPath, 'company-admin.sqlite');
-    const backupPath = path.join(userDataPath, `company-admin-backup-${Date.now()}.db`);
-    
-    const fs = require('fs');
-    fs.copyFileSync(dbPath, backupPath);
-    
-    return { success: true, path: backupPath };
-  } catch (error) {
-    console.error('Database backup error:', error);
+    console.error('Error getting users:', error);
     return { success: false, error: error.message };
   }
 });
 
-// Save user profile
-ipcMain.handle('user:save-profile', async (event, userData) => {
+// Get registration information
+ipcMain.handle('auth:get-registration-info', async (event) => {
   try {
-    return dbService.saveUserProfile(userData);
+    const info = authService.getRegistrationInfo();
+    return { success: true, data: info };
   } catch (error) {
-    console.error('Error saving user profile:', error);
-    throw error;
+    console.error('Error getting registration info:', error);
+    return { success: false, error: error.message };
   }
 });
 
-// Get user profile
-ipcMain.handle('user:get-profile', async (event, email) => {
+// Check if system is registered
+ipcMain.handle('auth:is-registered', async (event) => {
   try {
-    return dbService.getUserProfile(email);
+    const isRegistered = authService.isSystemRegistered();
+    return { success: true, isRegistered };
   } catch (error) {
-    console.error('Error getting user profile:', error);
-    return null;
+    console.error('Error checking registration:', error);
+    return { success: false, error: error.message };
   }
 });
 
-// Update user avatar
-ipcMain.handle('user:update-avatar', async (event, email, avatarData) => {
+// User login
+ipcMain.handle('auth:login', async (event, email, password) => {
   try {
-    return dbService.updateUserAvatar(email, avatarData);
+    console.log('Login attempt for:', email);
+    const result = authService.verifyAdminLogin(email, password);
+    return result;
   } catch (error) {
-    console.error('Error updating avatar:', error);
-    throw error;
+    console.error('Error during login:', error);
+    return { success: false, error: error.message };
   }
 });
 
-// Get user settings
-ipcMain.handle('user:get-settings', async (event, email) => {
+// Register system (duplicate - removed since 'auth:register' already exists)
+// ipcMain.handle('register-system', async (event, registrationData) => { ... }
+
+// Store registration
+ipcMain.handle('auth:register', async (event, registrationData) => {
   try {
-    return dbService.getUserSettings(email);
+    console.log('Registration request received');
+    const result = authService.storeRegistration(registrationData);
+    return { success: true, data: result };
   } catch (error) {
-    console.error('Error getting user settings:', error);
-    return null;
+    console.error('Registration error:', error);
+    return { success: false, error: error.message };
   }
 });
 
+// Reset Admin Password
+ipcMain.handle('auth:reset-admin-password', async (event, email, superAdminPassword, newPassword) => {
+  try {
+    console.log('Resetting admin password for:', email);
+    const result = authService.resetAdminPassword(email, superAdminPassword, newPassword);
+    return result;
+  } catch (error) {
+    console.error('Error resetting admin password:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Reset registration (for testing only)
+ipcMain.handle('auth:reset-registration', async () => {
+  try {
+    const result = authService.resetRegistration();
+    return { success: true, data: result };
+  } catch (error) {
+    console.error('Error resetting registration:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Update company info
 ipcMain.handle('auth:update-company-info', async (event, companyData) => {
   try {
     const stmt = authService.db.prepare(`
@@ -693,5 +334,378 @@ ipcMain.handle('auth:update-company-info', async (event, companyData) => {
   } catch (error) {
     console.error('Error updating company info:', error);
     return { success: false, error: error.message };
+  }
+});
+
+// Update user
+ipcMain.handle('auth:update-user', async (event, userId, userData) => {
+  try {
+    const result = authService.updateUser(userId, userData);
+    return { success: true, data: result };
+  } catch (error) {
+    console.error('Error updating user:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Verify Super Admin Password (duplicate handler removed - keeping 'auth:verify-super-admin')
+// ipcMain.handle('verify-super-admin-password', async (event, email, password) => { ... }
+
+// Verify Super Admin Password
+ipcMain.handle('auth:verify-super-admin', async (event, email, superAdminPassword) => {
+  try {
+    console.log('Verifying Super Admin Password for:', email);
+    const result = authService.verifySuperAdminPassword(email, superAdminPassword);
+    return result;
+  } catch (error) {
+    console.error('Error verifying super admin password:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+//  ATTENDANCE IPC HANDLERS 
+
+// Get attendance for cutoff period
+ipcMain.handle('attendance:get-cutoff', async (event, year, month, isFirstHalf) => {
+  try {
+    return dbService.getAttendanceForCutoff(year, month, isFirstHalf);
+  } catch (error) {
+    console.error('Error getting cutoff attendance:', error);
+    return [];
+  }
+});
+
+// Get monthly attendance report
+ipcMain.handle('attendance:get-monthly-report', async (event, year, month) => {
+  try {
+    return dbService.getMonthlyAttendanceReport(year, month);
+  } catch (error) {
+    console.error('Error getting monthly attendance report:', error);
+    return [];
+  }
+});
+
+// Get today's attendance
+ipcMain.handle('attendance:get-today', async () => {
+  try {
+    return dbService.getTodayAttendance();
+  } catch (error) {
+    console.error('Error getting today\'s attendance:', error);
+    return [];
+  }
+});
+
+// Get today's attendance summary
+ipcMain.handle('attendance:get-today-summary', async () => {
+  try {
+    return dbService.getTodayAttendanceSummary();
+  } catch (error) {
+    console.error('Error getting today\'s attendance summary:', error);
+    return {
+      presentToday: 0,
+      absentToday: 0,
+      lateToday: 0,
+      leaveToday: 0,
+      attendanceRate: '0%'
+    };
+  }
+});
+
+// Get weekly attendance
+ipcMain.handle('attendance:get-weekly', async () => {
+  try {
+    return dbService.getWeeklyAttendance();
+  } catch (error) {
+    console.error('Error getting weekly attendance:', error);
+    return [];
+  }
+});
+
+// Record attendance
+ipcMain.handle('attendance:record', async (event, attendance) => {
+  try {
+    return dbService.recordAttendance(attendance);
+  } catch (error) {
+    console.error('Error recording attendance:', error);
+    throw error;
+  }
+});
+
+//  DATABASE IPC HANDLERS 
+
+// Database backup/export
+ipcMain.handle('database:backup', async () => {
+  try {
+    const userDataPath = app.getPath('userData');
+    const dbPath = path.join(userDataPath, 'company-admin.sqlite');
+    const backupPath = path.join(userDataPath, `company-admin-backup-${Date.now()}.db`);
+    
+    const fs = require('fs');
+    fs.copyFileSync(dbPath, backupPath);
+    
+    return { success: true, path: backupPath };
+  } catch (error) {
+    console.error('Database backup error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Database execute
+ipcMain.handle('database:execute', async (event, sql, params) => {
+  try {
+    return dbService.execute(sql, params);
+  } catch (error) {
+    console.error('Database execute error:', error);
+    throw error;
+  }
+});
+
+// Database query
+ipcMain.handle('database:query', async (event, sql, params) => {
+  try {
+    return dbService.query(sql, params);
+  } catch (error) {
+    console.error('Database query error:', error);
+    throw error;
+  }
+});
+
+//  DEPARTMENT IPC HANDLERS 
+
+// Create department
+ipcMain.handle('departments:create', async (event, department) => {
+  return new Promise((resolve, reject) => {
+    setImmediate(() => {
+      try {
+        resolve(dbService.createDepartment(department));
+      } catch (error) {
+        console.error('Error creating department:', error);
+        reject(error);
+      }
+    });
+  });
+});
+
+// Delete department
+ipcMain.handle('departments:delete', async (event, id) => {
+  return new Promise((resolve, reject) => {
+    setImmediate(() => {
+      try {
+        resolve(dbService.deleteDepartment(id));
+      } catch (error) {
+        console.error('Error deleting department:', error);
+        reject(error);
+      }
+    });
+  });
+});
+
+// Get all departments
+ipcMain.handle('departments:get-all', async () => {
+  return new Promise((resolve, reject) => {
+    setImmediate(() => {
+      try {
+        resolve(dbService.getAllDepartments());
+      } catch (error) {
+        console.error('Error getting all departments:', error);
+        resolve([]); // safe fallback
+      }
+    });
+  });
+});
+
+//  EMPLOYEE IPC HANDLERS 
+
+// Create employee
+ipcMain.handle('employees:create', async (event, employee) => {
+  try {
+    console.log('Creating employee in main process:', employee);
+    const result = dbService.createEmployee(employee);
+    console.log('Employee created:', result);
+    return result;
+  } catch (error) {
+    console.error('Error creating employee:', error);
+    throw error;
+  }
+});
+
+// Delete employee
+ipcMain.handle('employees:delete', async (event, id) => {
+  try {
+    return dbService.deleteEmployee(id);
+  } catch (error) {
+    console.error('Error deleting employee:', error);
+    throw error;
+  }
+});
+
+// Get all employees
+ipcMain.handle('employees:get-all', async () => {
+  try {
+    return dbService.getAllEmployees();
+  } catch (error) {
+    console.error('Error getting all employees:', error);
+    return [];
+  }
+});
+
+// Get employee by id
+ipcMain.handle('employees:get-by-id', async (event, id) => {
+  try {
+    return dbService.getEmployeeById(id);
+  } catch (error) {
+    console.error('Error getting employee by id:', error);
+    return null;
+  }
+});
+
+// Update employee
+ipcMain.handle('employees:update', async (event, id, employee) => {
+  try {
+    return dbService.updateEmployee(id, employee);
+  } catch (error) {
+    console.error('Error updating employee:', error);
+    throw error;
+  }
+});
+
+//  PAYROLL IPC HANDLERS 
+
+// Get all payroll
+ipcMain.handle('payroll:get-all', async () => {
+  try {
+    return dbService.getAllPayroll();
+  } catch (error) {
+    console.error('Error getting all payroll:', error);
+    return [];
+  }
+});
+
+// Get payroll by cutoff period
+ipcMain.handle('payroll:get-by-cutoff', async (event, year, month, cutoffType) => {
+  try {
+    return dbService.getPayrollByCutoff(year, month, cutoffType);
+  } catch (error) {
+    console.error('Error getting payroll by cutoff:', error);
+    return [];
+  }
+});
+
+// Get payroll by employee and period
+ipcMain.handle('payroll:get-by-employee-period', async (event, employeeId, year, month) => {
+  try {
+    return dbService.getPayrollByEmployeeAndPeriod(employeeId, year, month);
+  } catch (error) {
+    console.error('Error getting payroll by employee and period:', error);
+    return null;
+  }
+});
+
+// Get payroll summary
+ipcMain.handle('payroll:get-summary', async (event, year, month) => {
+  try {
+    return dbService.getPayrollSummary(year, month);
+  } catch (error) {
+    console.error('Error getting payroll summary:', error);
+    return [];
+  }
+});
+
+// Mark payroll as paid
+ipcMain.handle('payroll:mark-paid', async (event, payrollId, paymentDate) => {
+  try {
+    return dbService.markPayrollAsPaid(payrollId, paymentDate);
+  } catch (error) {
+    console.error('Error marking payroll as paid:', error);
+    throw error;
+  }
+});
+
+// Process bi-monthly payroll
+ipcMain.handle('payroll:process-bi-monthly', async (event, payrollData) => {
+  try {
+    return dbService.processBiMonthlyPayroll(payrollData);
+  } catch (error) {
+    console.error('Error processing bi-monthly payroll:', error);
+    throw error;
+  }
+});
+
+// Process payroll
+ipcMain.handle('payroll:process', async (event, payrollData) => {
+  try {
+    return dbService.processPayroll(payrollData);
+  } catch (error) {
+    console.error('Error processing payroll:', error);
+    throw error;
+  }
+});
+
+//  USER PROFILE IPC HANDLERS 
+
+// Get user profile
+ipcMain.handle('user:get-profile', async (event, email) => {
+  try {
+    return dbService.getUserProfile(email);
+  } catch (error) {
+    console.error('Error getting user profile:', error);
+    return null;
+  }
+});
+
+// Get user settings
+ipcMain.handle('user:get-settings', async (event, email) => {
+  try {
+    return dbService.getUserSettings(email);
+  } catch (error) {
+    console.error('Error getting user settings:', error);
+    return null;
+  }
+});
+
+// Save user profile
+ipcMain.handle('user:save-profile', async (event, userData) => {
+  try {
+    return dbService.saveUserProfile(userData);
+  } catch (error) {
+    console.error('Error saving user profile:', error);
+    throw error;
+  }
+});
+
+// Update user avatar
+ipcMain.handle('user:update-avatar', async (event, email, avatarData) => {
+  try {
+    return dbService.updateUserAvatar(email, avatarData);
+  } catch (error) {
+    console.error('Error updating avatar:', error);
+    throw error;
+  }
+});
+
+// WINDOW CONTROL HANDLERS 
+
+// Close window
+ipcMain.on('window:close', () => {
+  if (mainWindow) {
+    mainWindow.close();
+  }
+});
+
+// Maximize window
+ipcMain.on('window:maximize', () => {
+  if (mainWindow) {
+    if (mainWindow.isMaximized()) {
+      mainWindow.unmaximize();
+    } else {
+      mainWindow.maximize();
+    }
+  }
+});
+
+// Minimize window
+ipcMain.on('window:minimize', () => {
+  if (mainWindow) {
+    mainWindow.minimize();
   }
 });
