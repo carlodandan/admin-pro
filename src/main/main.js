@@ -24,6 +24,7 @@ function createWindow() {
     minHeight: 800,
     show: false,
     backgroundColor: '#FFFFFF',
+    autoHideMenuBar: true,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -35,9 +36,6 @@ function createWindow() {
     icon: path.join(__dirname, '../../icons/adminpro.ico'),
     titleBarStyle: 'default',
   });
-
-  // Maximize the window automatically
-  mainWindow.maximize();
 
   // Load the app
   if (process.env.NODE_ENV === 'development') {
@@ -53,6 +51,8 @@ function createWindow() {
   // Use this event to display the window cleanly
   mainWindow.on('ready-to-show', () => {
     mainWindow.show();
+    mainWindow.maximize();
+    mainWindow.focus();
   });
 }
 

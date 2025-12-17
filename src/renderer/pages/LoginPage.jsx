@@ -87,7 +87,7 @@ const LoginPage = ({ onLogin }) => {
     <div className="min-h-screen bg-linear-to-br from-gray-100 to-gray-300 py-8 px-4">
       <div className="container mx-auto max-w-md">
         {/* Header with Company Info */}
-        <div className="text-center mb-3">
+        <div className="text-center mt-4 mb-3">
           {companyInfo && (
             <div className="mb-4 p-6 bg-gray-50 rounded-2xl border border-gray-700">
               <h1 className="text-3xl font-bold text-black mb-2">{companyInfo.company_name}</h1>

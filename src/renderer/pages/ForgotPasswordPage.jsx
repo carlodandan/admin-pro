@@ -194,11 +194,11 @@ const ForgotPasswordPage = ({ onResetPassword }) => {
       {showSuccessModal && <SuccessModal onClose={handleCloseSuccessModal} />}
 
       <div className="min-h-screen flex justify-center bg-gradient-to-br from-gray-100 to-gray-300 py-8 px-4 overflow-y-auto">
-        <div className="w-full max-w-md">
+        <div className="w-full max-w-xl">
           {/* Header */}
-          <div className="text-center mb-3">
-            <h1 className="text-l font-bold text-black mb-1">Reset Admin Password</h1>
-            <p className="text-xs text-gray-900 italic">
+          <div className="text-center mt-5 mb-3">
+            <h1 className="text-2xl font-bold text-black mb-1">Reset Admin Password</h1>
+            <p className="text-md text-gray-900 italic">
               Requires Super Admin Password for verification
             </p>
           </div>
@@ -207,15 +207,15 @@ const ForgotPasswordPage = ({ onResetPassword }) => {
           <div className="mb-2">
             <Link 
               to="/login" 
-              className="inline-flex items-center text-xs text-gray-800 hover:text-gray-500 transition-colors"
+              className="inline-flex items-center text-sm text-gray-800 hover:text-gray-500 transition-colors"
             >
-              <ArrowLeft className="h-3 w-3 mr-1" />
+              <ArrowLeft className="h-4 w-4 mr-1" />
               Back to Login
             </Link>
           </div>
 
           {/* Reset Card */}
-          <div className="bg-white backdrop-blur-lg rounded-xl border border-gray-700 p-4 shadow-xl">
+          <div className="bg-white backdrop-blur-lg rounded-xl border border-gray-700 p-5 shadow-xl">
             {step === 1 ? (
               /* Step 1: Verification */
               <form onSubmit={handleVerify} className="space-y-4">
@@ -224,8 +224,8 @@ const ForgotPasswordPage = ({ onResetPassword }) => {
                   <div className="flex items-start space-x-2">
                     <Shield className="h-4 w-4 text-red-800 shrink-0 mt-0.5" />
                     <div>
-                      <h3 className="text-sm font-medium text-black mb-1">Super Admin Password Required</h3>
-                      <p className="text-xs text-gray-900 italic">
+                      <h3 className="text-md font-medium text-black mb-1">Super Admin Password Required</h3>
+                      <p className="text-sm text-gray-900 italic">
                         You must provide the Super Admin Password that was generated during registration. 
                         This password is tied to your registered email.
                       </p>
@@ -235,26 +235,26 @@ const ForgotPasswordPage = ({ onResetPassword }) => {
 
                 {/* Email */}
                 <div className="space-y-1.5">
-                  <label htmlFor="email" className="block text-xs font-medium text-gray-900">
+                  <label htmlFor="email" className="block text-md font-medium text-gray-900">
                     Registered Email Address *
                   </label>
                   <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-900" />
+                    <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-900" />
                     <input
                       id="email"
                       name="email"
                       type="email"
                       value={formData.email}
                       onChange={handleInputChange}
-                      className={`pl-9 w-full py-2.5 bg-gray-50 border ${
+                      className={`pl-9 w-full py-4 bg-gray-50 border ${
                         formErrors.email ? 'border-red-500' : 'border-gray-700'
-                      } rounded-lg text-black placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent text-xs transition-all duration-200`}
+                      } rounded-lg text-black placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent text-sm transition-all duration-200`}
                       placeholder="admin@yourcompany.com"
                     />
                   </div>
                   {formErrors.email && (
                     <p className="text-xs text-red-400 flex items-center mt-1">
-                      <AlertCircle className="h-3 w-3 mr-1" />
+                      <AlertCircle className="h-4 w-4 mr-1" />
                       {formErrors.email}
                     </p>
                   )}
@@ -262,20 +262,20 @@ const ForgotPasswordPage = ({ onResetPassword }) => {
 
                 {/* Super Admin Password */}
                 <div className="space-y-1.5">
-                  <label htmlFor="super_admin_password" className="block text-xs font-medium text-gray-900">
+                  <label htmlFor="super_admin_password" className="block text-md font-medium text-gray-900">
                     Super Admin Password *
                   </label>
                   <div className="relative">
-                    <Key className="absolute left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-900" />
+                    <Key className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-900" />
                     <input
                       id="super_admin_password"
                       name="super_admin_password"
                       type={showSuperPassword ? "text" : "password"}
                       value={formData.super_admin_password}
                       onChange={handleInputChange}
-                      className={`pl-9 pr-9 w-full py-2.5 bg-gray-50 border ${
+                      className={`pl-9 pr-9 w-full py-4 bg-gray-50 border ${
                         formErrors.super_admin_password ? 'border-red-500' : 'border-gray-700'
-                      } rounded-lg text-black placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent text-xs transition-all duration-200`}
+                      } rounded-lg text-black placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent text-sm transition-all duration-200`}
                       placeholder="Enter Super Admin Password"
                     />
                     <button
@@ -283,16 +283,16 @@ const ForgotPasswordPage = ({ onResetPassword }) => {
                       onClick={() => setShowSuperPassword(!showSuperPassword)}
                       className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-800 hover:text-gray-700"
                     >
-                      {showSuperPassword ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                      {showSuperPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   </div>
                   {formErrors.super_admin_password && (
                     <p className="text-xs text-red-400 flex items-center mt-1">
-                      <AlertCircle className="h-3 w-3 mr-1" />
+                      <AlertCircle className="h-4 w-4 mr-1" />
                       {formErrors.super_admin_password}
                     </p>
                   )}
-                  <p className="text-xs text-gray-600 italic mt-1">
+                  <p className="text-sm text-gray-600 italic mt-1">
                     This is the password generated during registration.
                   </p>
                 </div>
@@ -300,10 +300,10 @@ const ForgotPasswordPage = ({ onResetPassword }) => {
                 {/* Reminder Notice */}
                 <div className="p-2 bg-amber-50 border border-amber-300 rounded-lg">
                   <div className="flex items-start space-x-2">
-                    <AlertCircle className="h-3 w-3 text-amber-700 shrink-0 mt-0.5" />
+                    <AlertCircle className="h-4 w-4 text-amber-700 shrink-0 mt-0.5" />
                     <div>
-                      <h3 className="text-xs font-medium text-black mb-0.5">Remember?</h3>
-                      <p className="text-xs text-gray-800 italic">
+                      <h3 className="text-sm font-medium text-black mb-0.5">Remember?</h3>
+                      <p className="text-sm text-gray-800 italic">
                         You were instructed to save this password securely during registration.
                         It cannot be recovered if lost.
                       </p>
@@ -315,7 +315,7 @@ const ForgotPasswordPage = ({ onResetPassword }) => {
                 {error && (
                   <div className="p-2 bg-red-100 border border-red-300 rounded-lg">
                     <p className="text-red-700 text-xs flex items-center">
-                      <AlertCircle className="h-3 w-3 mr-1" />
+                      <AlertCircle className="h-4 w-4 mr-1" />
                       {error}
                     </p>
                   </div>
@@ -324,7 +324,7 @@ const ForgotPasswordPage = ({ onResetPassword }) => {
                 {success && (
                   <div className="p-2 bg-green-50 border border-green-300 rounded-lg">
                     <p className="text-green-700 text-xs flex items-center">
-                      <CheckCircle2 className="h-3 w-3 mr-2" />
+                      <CheckCircle2 className="h-4 w-4 mr-2" />
                       {success}
                     </p>
                   </div>
@@ -334,11 +334,11 @@ const ForgotPasswordPage = ({ onResetPassword }) => {
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="w-full flex justify-center items-center py-2.5 px-4 border border-transparent rounded-lg font-medium text-white bg-gradient-to-r from-red-500 to-orange-600 hover:from-red-600 hover:to-orange-700 focus:outline-none focus:ring-1 focus:ring-red-500 focus:ring-offset-1 focus:ring-offset-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 text-xs"
+                  className="w-full flex justify-center items-center py-4 px-4 border border-transparent rounded-lg font-medium text-white bg-gradient-to-r from-red-500 to-orange-600 hover:from-red-600 hover:to-orange-700 focus:outline-none focus:ring-1 focus:ring-red-500 focus:ring-offset-1 focus:ring-offset-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 text-sm"
                 >
                   {isLoading ? (
                     <>
-                      <div className="h-3 w-3 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
+                      <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
                       Verifying Super Admin Password...
                     </>
                   ) : (
@@ -352,7 +352,7 @@ const ForgotPasswordPage = ({ onResetPassword }) => {
                 {/* Success Verification */}
                 <div className="p-2 bg-green-50 border border-green-300 rounded-lg">
                   <div className="flex items-center">
-                    <CheckCircle2 className="h-3 w-3 text-green-800 mr-2" />
+                    <CheckCircle2 className="h-4 w-4 text-green-800 mr-2" />
                     <div className="flex-1">
                       <p className="text-gray-900 text-xs font-medium">✓ Verification Successful</p>
                       <p className="text-xs text-gray-800 mt-0.5">
@@ -368,7 +368,7 @@ const ForgotPasswordPage = ({ onResetPassword }) => {
                     New Password *
                   </label>
                   <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-400" />
+                    <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                     <input
                       id="new_password"
                       name="new_password"
@@ -385,12 +385,12 @@ const ForgotPasswordPage = ({ onResetPassword }) => {
                       onClick={() => setShowNewPassword(!showNewPassword)}
                       className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-900"
                     >
-                      {showNewPassword ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                      {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   </div>
                   {formErrors.new_password && (
                     <p className="text-xs text-red-400 flex items-center mt-1">
-                      <AlertCircle className="h-3 w-3 mr-1" />
+                      <AlertCircle className="h-4 w-4 mr-1" />
                       {formErrors.new_password}
                     </p>
                   )}
@@ -407,7 +407,7 @@ const ForgotPasswordPage = ({ onResetPassword }) => {
                     Confirm New Password *
                   </label>
                   <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-400" />
+                    <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                     <input
                       id="confirm_password"
                       name="confirm_password"
@@ -424,12 +424,12 @@ const ForgotPasswordPage = ({ onResetPassword }) => {
                       onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                       className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-900"
                     >
-                      {showConfirmPassword ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                      {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   </div>
                   {formErrors.confirm_password && (
                     <p className="text-xs text-red-400 flex items-center mt-1">
-                      <AlertCircle className="h-3 w-3 mr-1" />
+                      <AlertCircle className="h-4 w-4 mr-1" />
                       {formErrors.confirm_password}
                     </p>
                   )}
@@ -438,7 +438,7 @@ const ForgotPasswordPage = ({ onResetPassword }) => {
                 {/* Important Notice */}
                 <div className="p-2 bg-blue-50 border border-blue-300 rounded-lg">
                   <div className="flex items-start space-x-2">
-                    <AlertCircle className="h-3 w-3 text-blue-600 shrink-0 mt-0.5" />
+                    <AlertCircle className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
                     <div>
                       <h3 className="text-xs font-medium text-black mb-0.5">Security Note</h3>
                       <p className="text-xs text-gray-800 italic">
@@ -452,7 +452,7 @@ const ForgotPasswordPage = ({ onResetPassword }) => {
                 {error && (
                   <div className="p-2 bg-red-100 border border-red-300 rounded-lg">
                     <p className="text-red-700 text-xs flex items-center">
-                      <AlertCircle className="h-3 w-3 mr-1" />
+                      <AlertCircle className="h-4 w-4 mr-1" />
                       {error}
                     </p>
                   </div>
@@ -474,7 +474,7 @@ const ForgotPasswordPage = ({ onResetPassword }) => {
                   >
                     {isLoading ? (
                       <>
-                        <div className="h-3 w-3 border-2 border-white border-t-transparent rounded-full animate-spin mr-2 inline-block"></div>
+                        <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2 inline-block"></div>
                         Resetting...
                       </>
                     ) : (
@@ -486,8 +486,8 @@ const ForgotPasswordPage = ({ onResetPassword }) => {
             )}
 
             {/* Footer Note */}
-            <div className="text-center pt-2 border-t border-gray-300 mt-2">
-              <p className="text-xs text-gray-900">
+            <div className="text-center pt-4 border-t border-gray-300 mt-4">
+              <p className="text-md text-gray-900">
                 If you lost your Super Admin Password, contact system administrator.
                 <br />
                 <span className="text-red-600 font-medium">⚠ Cannot be recovered through this system</span>
@@ -497,7 +497,7 @@ const ForgotPasswordPage = ({ onResetPassword }) => {
 
           {/* Footer */}
           <div className="mt-6 text-center">
-            <p className="text-xs text-gray-500">
+            <p className="text-md text-gray-500">
               Company Administration System • © {new Date().getFullYear()}
             </p>
           </div>
