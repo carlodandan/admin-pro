@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Filter, Download, Search, MoreVertical, Eye, Edit, Trash2, Mail, Phone, UserPlus, Users, Calendar, CreditCard, Loader2 } from 'lucide-react';
+import { Plus, Filter, Download, Search, MoreVertical, Eye, Edit, Mail, Phone, UserPlus, Users, Calendar, CreditCard, Loader2 } from 'lucide-react';
 import AddEmployeeModal from '../components/Employees/AddEmployeeModal';
+import DeleteEmployee from '../components/Employees/DeleteEmployee'; // Import the new component
 
 const Employees = () => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -10,6 +11,8 @@ const Employees = () => {
   const [loading, setLoading] = useState(true);
   const [departments, setDepartments] = useState([]);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [error, setError] = useState(''); // Add error state
+  const [success, setSuccess] = useState(''); // Add success state
   const [stats, setStats] = useState({
     totalEmployees: 0,
     activeToday: 0,
@@ -25,12 +28,14 @@ const Employees = () => {
   const loadEmployees = async () => {
     try {
       setLoading(true);
+      setError('');
       const data = await window.electronAPI.getAllEmployees();
       console.log('Loaded employees:', data);
       setEmployees(data || []);
       calculateStats(data || []);
     } catch (error) {
       console.error('Error loading employees:', error);
+      setError('Failed to load employees');
       setEmployees([]);
     } finally {
       setLoading(false);
@@ -71,17 +76,22 @@ const Employees = () => {
     });
   };
 
-  // Handle delete employee
-  const handleDeleteEmployee = async (id) => {
-    if (window.confirm('Are you sure you want to delete this employee?')) {
-      try {
-        await window.electronAPI.deleteEmployee(id);
-        await loadEmployees(); // Refresh the list
-      } catch (error) {
-        console.error('Error deleting employee:', error);
-        alert('Failed to delete employee');
-      }
-    }
+  // Handle delete success
+  const handleDeleteSuccess = (message) => {
+    setSuccess(message);
+    // Refresh the employee list
+    loadEmployees();
+    
+    // Clear success message after 3 seconds
+    setTimeout(() => setSuccess(''), 3000);
+  };
+
+  // Handle delete error
+  const handleDeleteError = (errorMessage) => {
+    setError(errorMessage);
+    
+    // Clear error message after 5 seconds
+    setTimeout(() => setError(''), 5000);
   };
 
   // Transform database employee to UI employee
@@ -224,6 +234,19 @@ const Employees = () => {
           </button>
         </div>
       </div>
+
+      {/* Success and Error Messages */}
+      {success && (
+        <div className="p-3 bg-green-50 border border-green-200 rounded text-green-600 text-sm">
+          {success}
+        </div>
+      )}
+      
+      {error && (
+        <div className="p-3 bg-red-50 border border-red-200 rounded text-red-600 text-sm">
+          {error}
+        </div>
+      )}
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -422,27 +445,26 @@ const Employees = () => {
                               title="View Details"
                               onClick={() => handleViewEmployee(employee.id)}
                             >
-                              <Eye size={18} className="text-blue-600" />
+                              <Eye size={18} className="text-blue-600 hover:text-blue-700" />
                             </button>
                             <button 
                               className="p-2 hover:bg-gray-100 rounded-lg" 
                               title="Edit"
                               onClick={() => handleEditEmployee(employee.id)}
                             >
-                              <Edit size={18} className="text-green-600" />
+                              <Edit size={18} className="text-green-600 hover:text-green-700" />
                             </button>
-                            <button 
-                              className="p-2 hover:bg-gray-100 rounded-lg" 
-                              title="Delete"
-                              onClick={() => handleDeleteEmployee(employee.id)}
-                            >
-                              <Trash2 size={18} className="text-red-600" />
-                            </button>
+                            <DeleteEmployee
+                              employeeId={employee.id}
+                              employeeName={employee.name}
+                              onDeleteSuccess={handleDeleteSuccess}
+                              onDeleteError={handleDeleteError}
+                            />
                             <button 
                               className="p-2 hover:bg-gray-100 rounded-lg"
                               onClick={() => console.log('More options')}
                             >
-                              <MoreVertical size={18} className="text-gray-600" />
+                              <MoreVertical size={18} className="text-gray-600 hover:text-gray-700" />
                             </button>
                           </div>
                         </td>

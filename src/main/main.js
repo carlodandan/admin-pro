@@ -417,24 +417,6 @@ ipcMain.handle('employees:delete', async (event, id) => {
   }
 });
 
-ipcMain.handle('departments:get-all', async () => {
-  try {
-    return dbService.getAllDepartments();
-  } catch (error) {
-    console.error('Error getting all departments:', error);
-    return [];
-  }
-});
-
-ipcMain.handle('departments:delete', async (event, id) => {
-  try {
-    return dbService.deleteDepartment(id);
-  } catch (error) {
-    console.error('Error deleting department:', error);
-    throw error;
-  }
-});
-
 ipcMain.handle('attendance:get-today', async () => {
   try {
     return dbService.getTodayAttendance();
@@ -590,13 +572,44 @@ ipcMain.on('window:close', () => {
 });
 
 ipcMain.handle('departments:create', async (event, department) => {
-  try {
-    return dbService.createDepartment(department);
-  } catch (error) {
-    console.error('Error creating department:', error);
-    throw error;
-  }
+  return new Promise((resolve, reject) => {
+    setImmediate(() => {
+      try {
+        resolve(dbService.createDepartment(department));
+      } catch (error) {
+        console.error('Error creating department:', error);
+        reject(error);
+      }
+    });
+  });
 });
+
+ipcMain.handle('departments:delete', async (event, id) => {
+  return new Promise((resolve, reject) => {
+    setImmediate(() => {
+      try {
+        resolve(dbService.deleteDepartment(id));
+      } catch (error) {
+        console.error('Error deleting department:', error);
+        reject(error);
+      }
+    });
+  });
+});
+
+ipcMain.handle('departments:get-all', async () => {
+  return new Promise((resolve, reject) => {
+    setImmediate(() => {
+      try {
+        resolve(dbService.getAllDepartments());
+      } catch (error) {
+        console.error('Error getting all departments:', error);
+        resolve([]); // safe fallback
+      }
+    });
+  });
+});
+
 
 // Database backup/export
 ipcMain.handle('database:backup', async () => {
