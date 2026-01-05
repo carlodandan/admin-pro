@@ -595,7 +595,7 @@ const Payroll = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {payrollData.slice(0, 5).map((payroll) => (
+                  {payrollData.map((payroll) => (
                     <tr key={payroll.id} className="hover:bg-gray-50">
                       <td className="py-4 px-4">
                         <p className="font-medium">{payroll.employee_name}</p>
