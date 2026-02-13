@@ -1,41 +1,102 @@
 # Admin Pro
-A Modern, Full-Featured Admin Management System designed for Companies and Businesses
 
-![Modern-blue](https://img.shields.io/badge/Dashboard-Modern-blue) ![Electron-39.2.7](https://img.shields.io/badge/Electron-39.2.7-61DAFB?logo=electron) ![Vite-5.4.21](https://img.shields.io/badge/Vite-5.4.21-61DAFB?logo=vite) ![React-19.2.3](https://img.shields.io/badge/React-19.2.3-61DAFB?logo=react) ![Tailwind_CSS-4.1.18](https://img.shields.io/badge/Tailwind_CSS-4.1.18-06B6D4?logo=tailwindcss)
-![License-MIT](https://img.shields.io/badge/License-MIT-green)
+> Company Administration System Application
 
-# Overview
-Admin Pro is a comprehensive admin management system designed to streamline company operations, employee management, payroll processing, and attendance tracking. Built with modern web technologies, it provides an intuitive interface for administrators to manage all aspects of their organization efficiently.
+A robust, offline-first desktop application for managing employees, attendance, and payroll. Built with modern web technologies and wrapped in Electron for a native experience on Windows.
 
-![Admin Pro](https://raw.githubusercontent.com/carlodandan/admin-pro/refs/heads/main/images/dashboard.png)
+## 🚀 Quick Start
 
-# Features
-### Dashboard & Analytics
-- Real-time overview of company metrics
-- Interactive charts and data visualization
-- Quick stats and performance indicators
-- Welcome banner with actionable insights
+Follow these steps to set up and run the application from scratch.
 
-### Employee Management
-- Complete employee profiles and records
-- Department assignment and management
-- Role-based access control
-- Employee directory with search and filters
+### Prerequisites
 
-### Attendance Tracking
-- Daily attendance recording
-- Weekly attendance visualization
-- Leave management and approval system
-- Attendance reports and analytics
+-   **OS**: Windows 10/11 (This project is configured for Windows).
+-   **Node.js**: v18 or higher.
+-   **Package Manager**: [pnpm](https://pnpm.io/) (recommended) or npm.
 
-### Payroll Management
-- Salary processing and calculations
-- Payroll summary and pending items
-- Tax calculations and deductions
-- Payment history and records
+### Installation
 
-### Department Management
-- Department creation and configuration
-- Employee distribution across departments
-- Department performance metrics
-- Salary analysis by department
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/carlodandan/admin-pro.git
+    cd admin-pro
+    ```
+
+2.  **Install dependencies:**
+    ```bash
+    pnpm install
+    ```
+
+3.  **Configure Environment:**
+    -   Copy `.env.example` to `.env`.
+    -   Fill in your Supabase credentials.
+    ```bash
+    cp .env.example .env
+    ```
+
+4.  **Start Development Server:**
+    ```bash
+    pnpm start
+    ```
+    This will launch the Electron app with hot-reloading enabled.
+
+## 📦 Building for Production
+
+To create a distributable installer (EXE) for Windows:
+
+```bash
+pnpm make
+```
+
+The output files will be located in the `out/` directory.
+
+> **⚠️ Note on Cross-Platform Builds:**
+> This specific configuration is optimized for **Windows**. If you wish to build for macOS or Linux, please refer to the [Electron Forge documentation](https://www.electronforge.io/) to configure the appropriate makers for your target platform.
+
+## ✨ Features
+
+-   **Employee Management**: centralized database for employee profiles, roles, and status.
+-   **Department Organization**: Manage company structure and budgets.
+-   **Attendance System**:
+    -   **Kiosk Mode**: Dedicated interface for employees to clock in/out using a PIN.
+    -   **Manual Entry**: Admin override for corrections.
+    -   **Reporting**: Daily, weekly, and monthly attendance summaries.
+-   **Payroll Processing**:
+    -   Automated calculation based on attendance.
+    -   Support for allowances, deductions, and tax.
+    -   Payslip generation.
+-   **Offline-First Architecture**:
+    -   Uses **SQLite** (`better-sqlite3`) for robust local data storage.
+    -   Background synchronization with **Supabase** for cloud backup and remote access.
+    -   Functions seamlessly without an internet connection.
+
+## 🛠️ Technology Stack
+
+-   **Runtime**: [Electron](https://www.electronjs.org/)
+-   **Build Tool**: [Vite](https://vitejs.dev/) + [Electron Forge](https://www.electronforge.io/)
+-   **Frontend**: React, Tailwind CSS
+-   **Database**:
+    -   Local: SQLite (better-sqlite3)
+    -   Cloud: Supabase (PostgreSQL)
+-   **Language**: JavaScript (ES6+)
+
+## ⚙️ Configuration
+
+The application uses a `.env` file for configuration.
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `SUPABASE_URL` | URL of your Supabase project | Yes |
+| `SUPABASE_KEY` | Service Role Key for Supabase | Yes |
+
+## 🤝 Contributing
+
+1.  Fork the project
+2.  Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3.  Commit your changes (`git commit -m 'feat: Add some AmazingFeature'`)
+4.  Push to the branch (`git push origin feature/AmazingFeature`)
+5.  Open a Pull Request
+
+## 📄 License
+
+Distributed under the MIT License. See `LICENSE` for more information.
