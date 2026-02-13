@@ -1,52 +1,55 @@
 // Philippine Payroll Calculator Utility (Bi-Monthly)
-// Based on 2024 Philippine Tax Brackets, SSS, PhilHealth, and Pag-IBIG contributions
+// Based on 2025 Philippine Tax Brackets (TRAIN Law Phase 2)
+// This model uses annualized income estimation for dynamic monthly tax calculation.
 
 class PhilippinePayrollCalculator {
-  // Updated 2024 Tax Brackets (under TRAIN Law) - Monthly calculation
-  static calculateMonthlyIncomeTax(monthlySalary) {
-    if (monthlySalary <= 20833) {
+  // TRAIN Law 2025 Yearly Tax Brackets
+  static calculateYearlyIncomeTax2025(annualTaxableIncome) {
+    if (annualTaxableIncome <= 250000) {
       return 0;
-    } else if (monthlySalary <= 33333) {
-      return (monthlySalary - 20833) * 0.15;
-    } else if (monthlySalary <= 66667) {
-      return 1875 + (monthlySalary - 33333) * 0.20;
-    } else if (monthlySalary <= 166667) {
-      return 8541.80 + (monthlySalary - 66667) * 0.25;
-    } else if (monthlySalary <= 666667) {
-      return 33541.80 + (monthlySalary - 166667) * 0.30;
+    } else if (annualTaxableIncome <= 400000) {
+      return (annualTaxableIncome - 250000) * 0.15;
+    } else if (annualTaxableIncome <= 800000) {
+      return 22500 + (annualTaxableIncome - 400000) * 0.20;
+    } else if (annualTaxableIncome <= 2000000) {
+      return 102500 + (annualTaxableIncome - 800000) * 0.25;
+    } else if (annualTaxableIncome <= 8000000) {
+      return 402500 + (annualTaxableIncome - 2000000) * 0.30;
     } else {
-      return 183541.80 + (monthlySalary - 666667) * 0.35;
+      return 2202500 + (annualTaxableIncome - 8000000) * 0.35;
     }
   }
 
+  // Calculate Monthly Income Tax by annualizing current monthly income
+  static calculateMonthlyIncomeTax(monthlySalary) {
+    // Estimated Annual Income based on this month's earnings
+    const annualSalary = monthlySalary * 12;
+    const annualTax = this.calculateYearlyIncomeTax2025(annualSalary);
+    // Return monthly tax portion
+    return annualTax / 12;
+  }
+
   // Calculate income tax for half-month (bi-monthly)
-  static calculateBiMonthlyIncomeTax(halfMonthSalary, annualized = false) {
-    if (annualized) {
-      // If we're annualizing for tax calculation (for 13th month, etc.)
-      const annualSalary = halfMonthSalary * 24; // 24 pay periods in a year
-      const monthlySalary = annualSalary / 12;
-      const annualTax = this.calculateMonthlyIncomeTax(monthlySalary) * 12;
-      return annualTax / 24; // Divide by 24 pay periods
-    }
-    
-    // For regular bi-monthly calculation
-    const monthlySalary = halfMonthSalary * 2; // Convert to monthly
-    const monthlyTax = this.calculateMonthlyIncomeTax(monthlySalary);
-    return monthlyTax / 2; // Divide by 2 for bi-monthly
+  static calculateBiMonthlyIncomeTax(halfMonthSalary) {
+    // Annualize based on 24 pay periods
+    const annualSalary = halfMonthSalary * 24;
+    const annualTax = this.calculateYearlyIncomeTax2025(annualSalary);
+    // Return bi-monthly tax portion
+    return annualTax / 24;
   }
 
   // SSS Contributions 2024 (Bi-monthly calculation)
   static calculateSSS(grossSalary, isHalfMonth = true) {
     // If it's half month, double it for monthly calculation
     const monthlySalary = isHalfMonth ? grossSalary * 2 : grossSalary;
-    
+
     // SSS contribution is based on compensation bracket
     const compensation = Math.min(Math.max(monthlySalary, 3000), 29750);
-    
+
     // Find the bracket (simplified version)
     let employeeShare = 0;
     let employerShare = 0;
-    
+
     if (compensation <= 3249.99) {
       employeeShare = 135;
       employerShare = 270;
@@ -210,13 +213,13 @@ class PhilippinePayrollCalculator {
       employeeShare = 1327.50;
       employerShare = 2655;
     }
-    
+
     // Divide by 2 for bi-monthly if needed
     if (isHalfMonth) {
       employeeShare = employeeShare / 2;
       employerShare = employerShare / 2;
     }
-    
+
     return {
       employeeShare: employeeShare,
       employerShare: employerShare,
@@ -229,29 +232,29 @@ class PhilippinePayrollCalculator {
     // PhilHealth premium is 4% of gross monthly salary
     // For employed members with compensation of ₱10,000.00 or below, the premium shall be at ₱450.00
     // Minimum: ₱450, Maximum: ₱5,000 (employee share max is ₱2,500)
-    
+
     const monthlySalary = isHalfMonth ? grossSalary * 2 : grossSalary;
-    
+
     let premium = monthlySalary * 0.04; // 4% of gross monthly salary
-    
+
     // Minimum premium
     if (monthlySalary <= 10000) {
       premium = 450;
     }
-    
+
     // Maximum premium
     premium = Math.min(premium, 5000);
-    
+
     // Split equally between employer and employee
     let employeeShare = premium / 2;
     let employerShare = premium / 2;
-    
+
     // Divide by 2 for bi-monthly if needed
     if (isHalfMonth) {
       employeeShare = employeeShare / 2;
       employerShare = employerShare / 2;
     }
-    
+
     return {
       employeeShare: employeeShare,
       employerShare: employerShare,
@@ -263,9 +266,9 @@ class PhilippinePayrollCalculator {
   static calculatePagIbig(grossSalary, isHalfMonth = true) {
     // Pag-IBIG contribution is 2% of gross salary, but with caps
     const monthlySalary = isHalfMonth ? grossSalary * 2 : grossSalary;
-    
+
     let employeeShare, employerShare;
-    
+
     if (monthlySalary <= 1500) {
       employeeShare = monthlySalary * 0.01;
       employerShare = monthlySalary * 0.02;
@@ -275,13 +278,13 @@ class PhilippinePayrollCalculator {
       employeeShare = compensation * 0.02;
       employerShare = compensation * 0.02;
     }
-    
+
     // Divide by 2 for bi-monthly if needed
     if (isHalfMonth) {
       employeeShare = employeeShare / 2;
       employerShare = employerShare / 2;
     }
-    
+
     return {
       employeeShare: employeeShare,
       employerShare: employerShare,
@@ -299,20 +302,20 @@ class PhilippinePayrollCalculator {
     // Half month salary calculation (24 working days per month / 2 = 12 days per half)
     const dailyRate = basicSalary / 24; // 24 working days per month
     const halfMonthSalary = dailyRate * 12; // Base for 12 working days
-    
+
     // Adjust for actual days present
     const actualSalary = (daysPresent / workingDays) * halfMonthSalary;
-    
+
     // Calculate mandatory deductions based on monthly salary
     const monthlySalary = basicSalary;
     const mandatoryDeductions = this.calculateMandatoryDeductions(monthlySalary, true); // true for bi-monthly
-    
-    // Calculate income tax for half-month
-    const incomeTax = this.calculateBiMonthlyIncomeTax(actualSalary);
-    
+
+    // Calculate income tax (Set to 0 for bi-monthly as requested, deferred to full month)
+    const incomeTax = 0;
+
     const totalDeductions = mandatoryDeductions.total + incomeTax + otherDeductions;
     const netSalary = actualSalary + allowances - totalDeductions;
-    
+
     // Calculate employer contributions for half-month
     const employerContributions = {
       sss: mandatoryDeductions.sss.employerShare,
@@ -320,7 +323,7 @@ class PhilippinePayrollCalculator {
       pagibig: mandatoryDeductions.pagibig.employerShare,
       total: mandatoryDeductions.sss.employerShare + mandatoryDeductions.philhealth.employerShare + mandatoryDeductions.pagibig.employerShare
     };
-    
+
     return {
       cutoffType: isFirstHalf ? 'First Half (1st-10th)' : 'Second Half (11th-25th)',
       workingDays: workingDays,
@@ -362,9 +365,9 @@ class PhilippinePayrollCalculator {
     const sss = this.calculateSSS(grossSalary, isHalfMonth);
     const philhealth = this.calculatePhilHealth(grossSalary, isHalfMonth);
     const pagibig = this.calculatePagIbig(grossSalary, isHalfMonth);
-    
+
     const totalDeductions = sss.employeeShare + philhealth.employeeShare + pagibig.employeeShare;
-    
+
     return {
       sss: sss,
       philhealth: philhealth,
@@ -378,14 +381,14 @@ class PhilippinePayrollCalculator {
     const monthlyBasic = basicSalary;
     const monthlyAllowances = allowances * 2; // Assuming allowances per half month
     const monthlyGross = monthlyBasic + monthlyAllowances;
-    
+
     // Combine deductions from both halves
     const mandatoryDeductions = {
       sss: {
         employee: (firstHalfData.deductions.mandatory.sss.employee + secondHalfData.deductions.mandatory.sss.employee) * 2,
         employer: (firstHalfData.deductions.mandatory.sss.employer + secondHalfData.deductions.mandatory.sss.employer) * 2,
-        total: (firstHalfData.deductions.mandatory.sss.employee + secondHalfData.deductions.mandatory.sss.employer + 
-                secondHalfData.deductions.mandatory.sss.employee + secondHalfData.deductions.mandatory.sss.employer)
+        total: (firstHalfData.deductions.mandatory.sss.employee + secondHalfData.deductions.mandatory.sss.employer +
+          secondHalfData.deductions.mandatory.sss.employee + secondHalfData.deductions.mandatory.sss.employer)
       },
       philhealth: {
         employee: (firstHalfData.deductions.mandatory.philhealth.employee + secondHalfData.deductions.mandatory.philhealth.employee) * 2,
@@ -398,15 +401,15 @@ class PhilippinePayrollCalculator {
         total: (firstHalfData.deductions.mandatory.pagibig.total + secondHalfData.deductions.mandatory.pagibig.total) * 2
       }
     };
-    
+
     const monthlyMandatoryTotal = mandatoryDeductions.sss.employee + mandatoryDeductions.philhealth.employee + mandatoryDeductions.pagibig.employee;
-    const monthlyIncomeTax = (firstHalfData.deductions.incomeTax + secondHalfData.deductions.incomeTax) * 2;
+    const monthlyIncomeTax = this.calculateMonthlyIncomeTax(monthlyGross);
     const monthlyOtherDeductions = otherDeductions * 2;
     const monthlyTotalDeductions = monthlyMandatoryTotal + monthlyIncomeTax + monthlyOtherDeductions;
-    
+
     const monthlyNetSalary = monthlyGross - monthlyTotalDeductions;
     const thirteenthMonth = this.calculateThirteenthMonth(basicSalary);
-    
+
     return {
       basicSalary: monthlyBasic,
       allowances: monthlyAllowances,

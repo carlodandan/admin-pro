@@ -3,11 +3,34 @@ import { Calendar, Clock, CheckCircle, XCircle, Users, Search, Filter, RefreshCw
 import AttendanceChart from '../components/Attendance/AttendanceChart';
 import MonthlyAttendanceReport from '../components/Attendance/MonthlyAttendanceReport';
 
+// Helper to get current time in Asia/Manila
+const getManilaTime = () => {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Manila',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  }).format(new Date());
+};
+
+// Helper to get current date in Asia/Manila (YYYY-MM-DD)
+const getManilaDate = () => {
+  const d = new Date();
+  const manilaDate = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(d);
+  return manilaDate;
+};
+
 const Attendance = () => {
   const [attendanceData, setAttendanceData] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState(getManilaDate());
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDepartment, setFilterDepartment] = useState('');
   const [departments, setDepartments] = useState([]);
@@ -25,7 +48,7 @@ const Attendance = () => {
       setLoading(true);
       // Use the provided date or selectedDate
       const targetDate = date || selectedDate;
-      
+
       // You need a new API method to get attendance for a specific date
       // Let's create one by querying the database
       const attendanceQuery = `
@@ -33,7 +56,7 @@ const Attendance = () => {
         WHERE date = ? 
         ORDER BY employee_id
       `;
-      
+
       const data = await window.electronAPI.query(attendanceQuery, [targetDate]);
       setAttendanceData(data || []);
     } catch (error) {
@@ -64,31 +87,79 @@ const Attendance = () => {
     }
   };
 
-  const handleMarkAttendance = async (employeeId, status) => {
+  const handleTimeIn = async (employeeId) => {
     try {
       setIsRecording(true);
-      
+      const currentTime = getManilaTime();
+
       const attendanceRecord = {
         employee_id: employeeId,
-        date: selectedDate, // Use the selected date, not today
-        status: status,
-        check_in: status === 'Present' ? '09:00:00' : null,
-        check_out: status === 'Present' ? '17:00:00' : null,
-        notes: status === 'Present' ? 'Manually marked present' : 'Manually marked absent'
+        date: selectedDate,
+        status: 'Present',
+        check_in: currentTime,
+        notes: `Timed in at ${currentTime} (Manila Time)`
       };
 
       await window.electronAPI.recordAttendance(attendanceRecord);
-      
-      // Refresh attendance data for the selected date
       await loadAttendanceData(selectedDate);
-      
-      // Show success message
+
       const employee = employees.find(emp => emp.id === employeeId);
       if (employee) {
-        alert(`Successfully marked ${employee.first_name} ${employee.last_name} as ${status} for ${selectedDate}`);
+        console.log(`Successfully timed in ${employee.first_name} at ${currentTime}`);
       }
     } catch (error) {
-      console.error('Error recording attendance:', error);
+      console.error('Error recording time in:', error);
+      alert(`Error: ${error.message}`);
+    } finally {
+      setIsRecording(false);
+    }
+  };
+
+  const handleTimeOut = async (employeeId) => {
+    try {
+      setIsRecording(true);
+      const currentTime = getManilaTime();
+
+      const attendanceRecord = {
+        employee_id: employeeId,
+        date: selectedDate,
+        check_out: currentTime,
+        status: 'Present', // Ensure status stays Present
+        notes: `Timed out at ${currentTime} (Manila Time)`
+      };
+
+      await window.electronAPI.recordAttendance(attendanceRecord);
+      await loadAttendanceData(selectedDate);
+
+      const employee = employees.find(emp => emp.id === employeeId);
+      if (employee) {
+        console.log(`Successfully timed out ${employee.first_name} at ${currentTime}`);
+      }
+    } catch (error) {
+      console.error('Error recording time out:', error);
+      alert(`Error: ${error.message}`);
+    } finally {
+      setIsRecording(false);
+    }
+  };
+
+  const handleMarkAbsent = async (employeeId) => {
+    try {
+      setIsRecording(true);
+
+      const attendanceRecord = {
+        employee_id: employeeId,
+        date: selectedDate,
+        status: 'Absent',
+        check_in: null,
+        check_out: null,
+        notes: 'Marked as Absent'
+      };
+
+      await window.electronAPI.recordAttendance(attendanceRecord);
+      await loadAttendanceData(selectedDate);
+    } catch (error) {
+      console.error('Error marking absent:', error);
       alert(`Error: ${error.message}`);
     } finally {
       setIsRecording(false);
@@ -96,36 +167,34 @@ const Attendance = () => {
   };
 
   const handleMarkAllPresent = async () => {
-    if (!window.confirm(`Mark all employees as present for ${selectedDate}?`)) {
+    if (!window.confirm(`Mark all employees as present (timed in) for ${selectedDate}?`)) {
       return;
     }
 
     try {
       setIsRecording(true);
-      
+      const currentTime = getManilaTime();
+
       for (const employee of filteredEmployees) {
-        // Check if already recorded for the selected date
-        const existingRecord = attendanceData.find(record => 
-          record.employee_id === employee.id && 
+        const existingRecord = attendanceData.find(record =>
+          record.employee_id === employee.id &&
           record.date === selectedDate
         );
 
         if (!existingRecord) {
           const attendanceRecord = {
             employee_id: employee.id,
-            date: selectedDate, // Use selected date
+            date: selectedDate,
             status: 'Present',
-            check_in: '09:00:00',
-            check_out: '17:00:00',
-            notes: 'Bulk marked present'
+            check_in: currentTime,
+            notes: 'Bulk marked present (timed in)'
           };
 
           await window.electronAPI.recordAttendance(attendanceRecord);
         }
       }
-      
+
       await loadAttendanceData(selectedDate);
-      alert(`All employees marked as present for ${selectedDate}!`);
     } catch (error) {
       console.error('Error bulk marking attendance:', error);
       alert(`Error: ${error.message}`);
@@ -155,12 +224,12 @@ const Attendance = () => {
     if (searchTerm && !`${employee.first_name} ${employee.last_name}`.toLowerCase().includes(searchTerm.toLowerCase())) {
       return false;
     }
-    
+
     // Filter by department
     if (filterDepartment && employee.department_id != filterDepartment) {
       return false;
     }
-    
+
     return true;
   });
 
@@ -176,7 +245,7 @@ const Attendance = () => {
     setSelectedDate(currentDate.toISOString().split('T')[0]);
   };
 
-  const isToday = selectedDate === new Date().toISOString().split('T')[0];
+  const isToday = selectedDate === getManilaDate();
 
   return (
     <div className="space-y-6">
@@ -194,7 +263,7 @@ const Attendance = () => {
           >
             <ChevronLeft size={20} />
           </button>
-          
+
           <div className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg">
             <Calendar size={18} className="text-gray-500" />
             <input
@@ -205,14 +274,14 @@ const Attendance = () => {
             />
             {!isToday && (
               <button
-                onClick={() => setSelectedDate(new Date().toISOString().split('T')[0])}
+                onClick={() => setSelectedDate(getManilaDate())}
                 className="text-sm text-blue-600 hover:text-blue-800"
               >
                 Today
               </button>
             )}
           </div>
-          
+
           <button
             onClick={() => navigateDate(1)}
             className="p-2 hover:bg-gray-100 rounded-lg"
@@ -220,7 +289,7 @@ const Attendance = () => {
           >
             <ChevronRight size={20} />
           </button>
-          
+
           <button
             onClick={loadAttendanceData}
             disabled={loading}
@@ -243,7 +312,7 @@ const Attendance = () => {
             <Users className="text-blue-500" size={24} />
           </div>
         </div>
-        
+
         <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
           <div className="flex items-center justify-between">
             <div>
@@ -253,7 +322,7 @@ const Attendance = () => {
             <CheckCircle className="text-green-500" size={24} />
           </div>
         </div>
-        
+
         <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
           <div className="flex items-center justify-between">
             <div>
@@ -263,7 +332,7 @@ const Attendance = () => {
             <XCircle className="text-red-500" size={24} />
           </div>
         </div>
-        
+
         <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
           <div className="flex items-center justify-between">
             <div>
@@ -292,7 +361,7 @@ const Attendance = () => {
                 className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg w-full md:w-64 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
-            
+
             {/* Department Filter */}
             <div className="flex items-center gap-2">
               <Filter size={18} className="text-gray-500" />
@@ -310,7 +379,7 @@ const Attendance = () => {
               </select>
             </div>
           </div>
-          
+
           <div className="flex gap-3">
             <button
               onClick={handleMarkAllPresent}
@@ -324,7 +393,7 @@ const Attendance = () => {
               )}
               Mark All Present
             </button>
-            
+
             <button
               onClick={() => {
                 setSearchTerm('');
@@ -342,18 +411,18 @@ const Attendance = () => {
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="p-4 border-b border-gray-200 bg-gray-50">
           <h3 className="font-semibold text-gray-900">
-            Employee Attendance for {new Date(selectedDate).toLocaleDateString('en-US', { 
-              weekday: 'long', 
-              year: 'numeric', 
-              month: 'long', 
-              day: 'numeric' 
+            Employee Attendance for {new Date(selectedDate).toLocaleDateString('en-US', {
+              weekday: 'long',
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric'
             })}
           </h3>
           <p className="text-sm text-gray-600">
             Showing {filteredEmployees.length} employee{filteredEmployees.length !== 1 ? 's' : ''}
           </p>
         </div>
-        
+
         {loading ? (
           <div className="flex items-center justify-center p-12">
             <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
@@ -380,10 +449,10 @@ const Attendance = () => {
               </thead>
               <tbody>
                 {filteredEmployees.map(employee => {
-                  const attendanceRecord = attendanceData.find(record => 
+                  const attendanceRecord = attendanceData.find(record =>
                     record.employee_id === employee.id
                   );
-                  
+
                   return (
                     <tr key={employee.id} className="border-b border-gray-200 hover:bg-gray-50">
                       <td className="py-4 px-4">
@@ -430,20 +499,31 @@ const Attendance = () => {
                       </td>
                       <td className="py-4 px-4">
                         <div className="flex gap-2">
-                          {attendanceRecord?.status !== 'Present' && (
+                          {!attendanceRecord?.check_in && (
                             <button
-                              onClick={() => handleMarkAttendance(employee.id, 'Present')}
-                              disabled={isRecording}
+                              onClick={() => handleTimeIn(employee.id)}
+                              disabled={isRecording || attendanceRecord?.status === 'Absent'}
                               className="px-3 py-1.5 bg-green-100 text-green-700 rounded-lg text-sm font-medium hover:bg-green-200 disabled:opacity-50 flex items-center gap-1"
                             >
-                              <CheckCircle size={14} />
-                              Present
+                              <Clock size={14} />
+                              Time In
                             </button>
                           )}
-                          
-                          {attendanceRecord?.status !== 'Absent' && (
+
+                          {attendanceRecord?.check_in && !attendanceRecord?.check_out && (
                             <button
-                              onClick={() => handleMarkAttendance(employee.id, 'Absent')}
+                              onClick={() => handleTimeOut(employee.id)}
+                              disabled={isRecording}
+                              className="px-3 py-1.5 bg-orange-100 text-orange-700 rounded-lg text-sm font-medium hover:bg-orange-200 disabled:opacity-50 flex items-center gap-1"
+                            >
+                              <Clock size={14} />
+                              Time Out
+                            </button>
+                          )}
+
+                          {attendanceRecord?.status !== 'Absent' && !attendanceRecord?.check_in && (
+                            <button
+                              onClick={() => handleMarkAbsent(employee.id)}
                               disabled={isRecording}
                               className="px-3 py-1.5 bg-red-100 text-red-700 rounded-lg text-sm font-medium hover:bg-red-200 disabled:opacity-50 flex items-center gap-1"
                             >
@@ -451,13 +531,20 @@ const Attendance = () => {
                               Absent
                             </button>
                           )}
-                          
+
                           {attendanceRecord && (
                             <button
-                              onClick={() => {
+                              onClick={async () => {
                                 if (window.confirm('Remove attendance record?')) {
-                                  // You'll need to add a deleteAttendance method to your API
-                                  alert('Delete functionality would go here');
+                                  try {
+                                    setIsRecording(true);
+                                    await window.electronAPI.execute('DELETE FROM attendance WHERE employee_id = ? AND date = ?', [employee.id, selectedDate]);
+                                    await loadAttendanceData(selectedDate);
+                                  } catch (err) {
+                                    console.error('Error deleting record:', err);
+                                  } finally {
+                                    setIsRecording(false);
+                                  }
                                 }
                               }}
                               disabled={isRecording}

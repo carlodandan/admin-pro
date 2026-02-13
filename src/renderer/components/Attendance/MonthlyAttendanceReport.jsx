@@ -1,10 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar, Download, Filter, Loader2, Users, CheckCircle, XCircle, Clock, AlertCircle } from 'lucide-react';
 
+const getManilaMonth = () => {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit'
+  }).format(new Date()); // YYYY-MM
+};
+
 const MonthlyAttendanceReport = () => {
-  const [selectedMonth, setSelectedMonth] = useState(
-    new Date().toISOString().split('T')[0].substring(0, 7) // YYYY-MM
-  );
+  const [selectedMonth, setSelectedMonth] = useState(getManilaMonth());
   const [reportData, setReportData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [summary, setSummary] = useState({
@@ -41,12 +47,12 @@ const MonthlyAttendanceReport = () => {
     setLoading(true);
     try {
       const [year, month] = selectedMonth.split('-').map(Number);
-      
+
       // Get real data from database
       const data = await window.electronAPI.getMonthlyAttendanceReport(year, month);
-      
+
       setReportData(data || []);
-      
+
       // Calculate summary statistics
       if (data && data.length > 0) {
         const totalEmployees = data.length;
@@ -54,14 +60,14 @@ const MonthlyAttendanceReport = () => {
         const totalAbsentDays = data.reduce((sum, row) => sum + (row.absent_days || 0), 0);
         const totalLateDays = data.reduce((sum, row) => sum + (row.late_days || 0), 0);
         const totalLeaveDays = data.reduce((sum, row) => sum + (row.leave_days || 0), 0);
-        
+
         // Working days per employee in this month
         const workingDaysPerMonth = getWorkingDaysInMonth(year, month);
         const totalPossibleDays = totalEmployees * workingDaysPerMonth;
-        const averageAttendance = totalPossibleDays > 0 
+        const averageAttendance = totalPossibleDays > 0
           ? ((totalPresentDays / totalPossibleDays) * 100).toFixed(1) + '%'
           : '0%';
-        
+
         setSummary({
           totalEmployees,
           totalPresentDays,
@@ -109,16 +115,16 @@ const MonthlyAttendanceReport = () => {
         row.leave_days || 0,
         row.total_recorded_days || 0,
         summary.workingDaysPerMonth,
-        row.total_recorded_days > 0 
+        row.total_recorded_days > 0
           ? `${(((row.present_days || 0) / row.total_recorded_days) * 100).toFixed(1)}%`
           : '0%'
       ]);
-      
+
       const csvContent = [
         headers.join(','),
         ...csvData.map(row => row.join(','))
       ].join('\n');
-      
+
       // Create download link
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = window.URL.createObjectURL(blob);
@@ -192,7 +198,7 @@ const MonthlyAttendanceReport = () => {
             <Users className="text-blue-500" size={20} />
           </div>
         </div>
-        
+
         <div className="bg-green-50 p-4 rounded-lg border border-green-100">
           <div className="flex items-center justify-between">
             <div>
@@ -202,7 +208,7 @@ const MonthlyAttendanceReport = () => {
             <CheckCircle className="text-green-500" size={20} />
           </div>
         </div>
-        
+
         <div className="bg-red-50 p-4 rounded-lg border border-red-100">
           <div className="flex items-center justify-between">
             <div>
@@ -212,7 +218,7 @@ const MonthlyAttendanceReport = () => {
             <XCircle className="text-red-500" size={20} />
           </div>
         </div>
-        
+
         <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-100">
           <div className="flex items-center justify-between">
             <div>
@@ -222,7 +228,7 @@ const MonthlyAttendanceReport = () => {
             <Clock className="text-yellow-500" size={20} />
           </div>
         </div>
-        
+
         <div className="bg-purple-50 p-4 rounded-lg border border-purple-100">
           <div className="flex items-center justify-between">
             <div>
@@ -232,7 +238,7 @@ const MonthlyAttendanceReport = () => {
             <AlertCircle className="text-purple-500" size={20} />
           </div>
         </div>
-        
+
         <div className="bg-indigo-50 p-4 rounded-lg border border-indigo-100">
           <div className="flex items-center justify-between">
             <div>
@@ -285,7 +291,7 @@ const MonthlyAttendanceReport = () => {
               <span className="text-xs text-gray-400 ml-2">(26 days with 2 days off)</span>
             </div>
           </div>
-          
+
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
@@ -305,13 +311,13 @@ const MonthlyAttendanceReport = () => {
                 {reportData.map((row) => {
                   const workingDaysRequired = summary.workingDaysPerMonth || 24;
                   const totalRecorded = row.total_recorded_days || 0;
-                  const attendanceRate = totalRecorded > 0 
+                  const attendanceRate = totalRecorded > 0
                     ? ((row.present_days || 0) / totalRecorded) * 100
                     : 0;
                   const workingDaysRate = workingDaysRequired > 0
                     ? ((row.present_days || 0) / workingDaysRequired) * 100
                     : 0;
-                  
+
                   return (
                     <tr key={row.employee_id} className="border-b border-gray-200 hover:bg-gray-50">
                       <td className="py-3 px-4">
@@ -373,12 +379,11 @@ const MonthlyAttendanceReport = () => {
                         <div className="space-y-2">
                           <div className="flex items-center">
                             <div className="w-full bg-gray-200 rounded-full h-2.5 mr-3">
-                              <div 
-                                className={`h-2.5 rounded-full ${
-                                  attendanceRate >= 90 ? 'bg-green-500' :
+                              <div
+                                className={`h-2.5 rounded-full ${attendanceRate >= 90 ? 'bg-green-500' :
                                   attendanceRate >= 75 ? 'bg-yellow-500' :
-                                  'bg-red-500'
-                                }`}
+                                    'bg-red-500'
+                                  }`}
                                 style={{ width: `${Math.min(attendanceRate, 100)}%` }}
                               ></div>
                             </div>
@@ -397,7 +402,7 @@ const MonthlyAttendanceReport = () => {
               </tbody>
             </table>
           </div>
-          
+
           {/* Legend */}
           <div className="mt-6 pt-4 border-t border-gray-200">
             <div className="flex flex-wrap gap-4">

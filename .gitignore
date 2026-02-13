@@ -90,3 +90,12 @@ typings/
 
 # Electron-Forge
 out/
+
+# Agent
+.agent/
+
+# Commit
+commit_msg.txt
+
+# VSCode
+.vscode/

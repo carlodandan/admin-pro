@@ -20,20 +20,20 @@ const PayrollSummary = () => {
   const loadPayrollData = async () => {
     try {
       setLoading(true);
-      
+
       // Get current month payroll data
       const [year, month] = selectedMonth.split('-').map(Number);
-      
+
       // Get all payroll records for the selected month
       const allPayroll = await window.electronAPI.getAllPayroll();
-      
+
       // Filter for the selected month
       const currentMonthPayroll = allPayroll.filter(p => {
         const payrollDate = new Date(p.period_start);
-        return payrollDate.getFullYear() === year && 
-               (payrollDate.getMonth() + 1) === month;
+        return payrollDate.getFullYear() === year &&
+          (payrollDate.getMonth() + 1) === month;
       });
-      
+
       // Transform data for the component
       const employees = currentMonthPayroll.map(payroll => ({
         id: payroll.id,
@@ -44,26 +44,26 @@ const PayrollSummary = () => {
         deductions: payroll.deductions || 0,
         netPay: payroll.net_salary,
         status: payroll.status || 'Pending',
-        payDate: payroll.payment_date ? 
-          new Date(payroll.payment_date).toLocaleDateString('en-PH') : 
+        payDate: payroll.payment_date ?
+          new Date(payroll.payment_date).toLocaleDateString('en-PH') :
           'Not paid',
         cutoffType: payroll.cutoff_type || 'Full Month',
         periodStart: payroll.period_start,
         periodEnd: payroll.period_end
       }));
-      
+
       // Calculate totals
       const total = employees.reduce((sum, emp) => sum + emp.netPay, 0);
       const paid = employees.filter(emp => emp.status === 'Paid').length;
       const pending = employees.filter(emp => emp.status === 'Pending').length;
-      
+
       setPayrollData({
         employees,
         total,
         paid,
         pending
       });
-      
+
     } catch (error) {
       console.error('Error loading payroll data:', error);
       setPayrollData({
@@ -123,12 +123,12 @@ const PayrollSummary = () => {
         emp.payDate,
         emp.cutoffType
       ]);
-      
+
       const csvContent = [
         headers.join(','),
         ...csvData.map(row => row.join(','))
       ].join('\n');
-      
+
       // Create download link
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = window.URL.createObjectURL(blob);
@@ -207,183 +207,138 @@ const PayrollSummary = () => {
   }
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-6">
-      <div className="flex justify-between items-center mb-6">
+    <div className="bg-white rounded-3xl border border-gray-100 p-8 shadow-sm">
+      {/* Header Section */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-8">
         <div>
-          <h3 className="text-lg font-semibold">Payroll Summary</h3>
-          <p className="text-gray-600">
-            {formatDate(selectedMonth)} Payroll
-          </p>
-          <div className="flex items-center gap-2 mt-1">
-            <span className="text-xs px-2 py-1 bg-blue-100 text-blue-800 rounded">
-              {payrollData.employees.length} records
-            </span>
-            <span className="text-xs text-gray-500">
-              Last updated: {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-            </span>
+          <div className="flex items-center gap-3 mb-2">
+            <div className="bg-blue-600 p-2 rounded-xl text-white shadow-lg shadow-blue-200">
+              <PhilippinePeso size={20} />
+            </div>
+            <h3 className="text-2xl font-black text-gray-900 tracking-tight">Financial Summary</h3>
           </div>
+          <p className="text-gray-500 font-medium">
+            Overview for {formatDate(selectedMonth)}
+          </p>
         </div>
-        <div className="flex gap-2">
-          <div className="flex items-center gap-2">
-            <Calendar size={18} className="text-gray-500" />
+
+        <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+          <div className="relative flex-1 md:flex-none">
+            <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
             <input
               type="month"
               value={selectedMonth}
               onChange={(e) => setSelectedMonth(e.target.value)}
-              className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              className="pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-sm font-bold text-gray-700 w-full"
               max={new Date().toISOString().split('T')[0].substring(0, 7)}
             />
           </div>
           <button
             onClick={handleExport}
             disabled={payrollData.employees.length === 0}
-            className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+            className="flex items-center justify-center gap-2 px-5 py-2.5 border border-gray-100 rounded-xl hover:bg-gray-50 transition-all disabled:opacity-50 text-sm font-bold text-gray-700 md:flex-1"
           >
             <Download size={18} />
-            Export
+            CSV
           </button>
           <button
             onClick={() => window.location.hash = '/payroll'}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            className="flex items-center justify-center gap-2 px-6 py-2.5 bg-gray-950 text-white rounded-xl hover:bg-gray-800 transition-all shadow-lg shadow-gray-200 text-sm font-bold md:flex-1"
           >
-            <PhilippinePeso size={18} />
-            Manage Payroll
+            Manage
           </button>
         </div>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-full">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="py-3 px-4 text-left text-sm font-semibold text-gray-700">Employee</th>
-              <th className="py-3 px-4 text-left text-sm font-semibold text-gray-700">Position</th>
-              <th className="py-3 px-4 text-left text-sm font-semibold text-gray-700">Salary</th>
-              <th className="py-3 px-4 text-left text-sm font-semibold text-gray-700">Allowances</th>
-              <th className="py-3 px-4 text-left text-sm font-semibold text-gray-700">Deductions</th>
-              <th className="py-3 px-4 text-left text-sm font-semibold text-gray-700">Net Pay</th>
-              <th className="py-3 px-4 text-left text-sm font-semibold text-gray-700">Status</th>
-              <th className="py-3 px-4 text-left text-sm font-semibold text-gray-700">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200">
-            {payrollData.employees.slice(0, 5).map((payroll) => (
-              <tr key={payroll.id} className="hover:bg-gray-50 transition-colors">
-                <td className="py-4 px-4">
-                  <div>
-                    <p className="font-medium">{payroll.employee}</p>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-500">Pay Date: {payroll.payDate}</span>
-                      <span className="text-xs px-1 py-0.5 bg-gray-100 text-gray-600 rounded">
-                        {payroll.cutoffType}
-                      </span>
-                    </div>
-                  </div>
-                </td>
-                <td className="py-4 px-4">
-                  <p className="text-gray-700">{payroll.position}</p>
-                </td>
-                <td className="py-4 px-4">
-                  <p className="font-semibold">{formatCurrency(payroll.salary)}</p>
-                </td>
-                <td className="py-4 px-4">
-                  <p className="text-green-600 font-medium">+{formatCurrency(payroll.bonus)}</p>
-                </td>
-                <td className="py-4 px-4">
-                  <p className="text-red-600 font-medium">-{formatCurrency(payroll.deductions)}</p>
-                </td>
-                <td className="py-4 px-4">
-                  <p className="font-bold text-lg text-blue-600">{formatCurrency(payroll.netPay)}</p>
-                </td>
-                <td className="py-4 px-4">
-                  <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(payroll.status)}`}>
-                    {getStatusIcon(payroll.status)}
-                    {payroll.status}
-                  </span>
-                </td>
-                <td className="py-4 px-4">
-                  <div className="flex gap-2">
-                    <button 
-                      className="p-2 hover:bg-gray-100 rounded-lg transition-colors" 
-                      title="Send Payslip"
-                      onClick={() => {
-                        // Send payslip functionality
-                        alert(`Sending payslip to ${payroll.employee}`);
-                      }}
-                    >
-                      <Send size={18} className="text-blue-600" />
-                    </button>
-                    <button 
-                      className="p-2 hover:bg-gray-100 rounded-lg transition-colors" 
-                      title="Print"
-                      onClick={() => {
-                        // Print functionality
-                        alert(`Printing payslip for ${payroll.employee}`);
-                      }}
-                    >
-                      <Printer size={18} className="text-gray-600" />
-                    </button>
-                  </div>
-                </td>
+      {/* Stats Quick Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-3xl p-6 text-white shadow-xl shadow-blue-100">
+          <p className="text-blue-100 text-xs font-black uppercase tracking-widest mb-1">Total Distribution</p>
+          <h4 className="text-3xl font-black mb-4">{formatCurrency(payrollData.total)}</h4>
+          <div className="flex items-center gap-2 text-xs font-bold bg-white/10 w-fit px-3 py-1.5 rounded-full">
+            <CheckCircle size={14} />
+            {payrollData.paid} Records Cleared
+          </div>
+        </div>
+
+        <div className="bg-gray-50 rounded-3xl p-6 border border-gray-100">
+          <p className="text-gray-400 text-[10px] font-black uppercase tracking-widest mb-1">Pending Processing</p>
+          <h4 className="text-3xl font-black text-gray-900 mb-4">{payrollData.pending}</h4>
+          <div className={`flex items-center gap-2 text-xs font-bold w-fit px-3 py-1.5 rounded-full ${payrollData.pending > 0 ? 'bg-orange-100 text-orange-600' : 'bg-green-100 text-green-600'}`}>
+            <Clock size={14} />
+            {payrollData.pending > 0 ? 'Awaiting Action' : 'All Processed'}
+          </div>
+        </div>
+
+        <div className="bg-gray-50 rounded-3xl p-6 border border-gray-100">
+          <p className="text-gray-400 text-[10px] font-black uppercase tracking-widest mb-1">Average Payout</p>
+          <h4 className="text-3xl font-black text-gray-900 mb-4">
+            {formatCurrency(payrollData.employees.length > 0 ? payrollData.total / payrollData.employees.length : 0)}
+          </h4>
+          <p className="text-xs text-gray-500 font-medium">Monthly baseline estimation</p>
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        <div className="flex justify-between items-center px-2">
+          <h4 className="text-xs font-black text-gray-400 uppercase tracking-widest">Recent Activity</h4>
+          <p className="text-[10px] font-bold text-blue-600 cursor-pointer hover:underline" onClick={() => window.location.hash = '/payroll'}>View Archive</p>
+        </div>
+
+        <div className="overflow-hidden rounded-2xl border border-gray-100">
+          <table className="w-full">
+            <thead className="bg-gray-50/50 border-b border-gray-100">
+              <tr>
+                <th className="py-4 px-6 text-left text-[10px] font-black text-gray-400 uppercase tracking-widest">Staff Member</th>
+                <th className="py-4 px-6 text-left text-[10px] font-black text-gray-400 uppercase tracking-widest">Net Pay</th>
+                <th className="py-4 px-6 text-left text-[10px] font-black text-gray-400 uppercase tracking-widest">Status</th>
+                <th className="py-4 px-6 text-right text-[10px] font-black text-gray-400 uppercase tracking-widest">Dispatch</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Total Summary */}
-      <div className="mt-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
-            <p className="text-sm text-gray-600">Total Payroll This Month</p>
-            <p className="text-xl font-bold">{formatCurrency(payrollData.total)}</p>
-            <p className="text-xs text-gray-500 mt-1">
-              Average: {formatCurrency(payrollData.employees.length > 0 ? payrollData.total / payrollData.employees.length : 0)}
-            </p>
-          </div>
-          <div>
-            <p className="text-sm text-gray-600">Employees to Pay</p>
-            <div className="flex items-center gap-4">
-              <p className="text-xl font-bold">{payrollData.employees.length}</p>
-              <div className="flex gap-2">
-                <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs">
-                  {payrollData.paid} Paid
-                </span>
-                <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs">
-                  {payrollData.pending} Pending
-                </span>
-              </div>
-            </div>
-            <p className="text-xs text-gray-500 mt-1">
-              Showing top 5 of {payrollData.employees.length} records
-            </p>
-          </div>
-          <div className="text-right">
-            <p className="text-sm text-gray-600">Payroll Status</p>
-            <div className="flex items-center justify-end gap-2">
-              <div className={`h-3 w-3 rounded-full ${payrollData.pending > 0 ? 'bg-yellow-500' : 'bg-green-500'}`}></div>
-              <p className="text-lg font-bold">
-                {payrollData.pending === 0 ? 'All Paid' : `${payrollData.pending} Pending`}
-              </p>
-            </div>
-            <p className="text-xs text-gray-500 mt-1">
-              {payrollData.employees.filter(e => e.cutoffType !== 'Full Month').length} bi-monthly records
-            </p>
-          </div>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {payrollData.employees.slice(0, 5).map((payroll) => (
+                <tr key={payroll.id} className="group hover:bg-gray-50/50 transition-all">
+                  <td className="py-4 px-6">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-[10px] font-black text-gray-500 uppercase">
+                        {payroll.employee.split(' ').map(n => n[0]).join('')}
+                      </div>
+                      <div>
+                        <p className="text-sm font-bold text-gray-900 leading-tight">{payroll.employee}</p>
+                        <p className="text-[10px] text-gray-400 font-medium">{payroll.position}</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="py-4 px-6">
+                    <p className="text-sm font-black text-gray-900">{formatCurrency(payroll.netPay)}</p>
+                  </td>
+                  <td className="py-4 px-6">
+                    <span className={`inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest ${getStatusColor(payroll.status)}`}>
+                      {payroll.status}
+                    </span>
+                  </td>
+                  <td className="py-4 px-6 text-right">
+                    <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                      <button
+                        className="p-2 hover:bg-blue-50 rounded-lg text-blue-600"
+                        onClick={() => alert(`Sending payslip to ${payroll.employee}`)}
+                      >
+                        <Send size={16} />
+                      </button>
+                      <button
+                        className="p-2 hover:bg-gray-100 rounded-lg text-gray-500"
+                        onClick={() => alert(`Printing payslip for ${payroll.employee}`)}
+                      >
+                        <Printer size={16} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
-
-      {/* View All Link */}
-      {payrollData.employees.length > 5 && (
-        <div className="mt-4 text-center">
-          <button
-            onClick={() => window.location.hash = '/payroll'}
-            className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-          >
-            View all {payrollData.employees.length} payroll records →
-          </button>
-        </div>
-      )}
     </div>
   );
 };

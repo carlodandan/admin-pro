@@ -12,6 +12,25 @@ class DatabaseService {
     this.initializeDatabase();
   }
 
+  getManilaDate() {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Manila',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(new Date());
+  }
+
+  getManilaTime() {
+    return new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Manila',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    }).format(new Date());
+  }
+
   initializeDatabase() {
     this.createTables();
     this.migrateDatabase();
@@ -125,14 +144,14 @@ class DatabaseService {
       // First, check if any user exists
       const checkStmt = this.db.prepare('SELECT COUNT(*) as count FROM users');
       const result = checkStmt.get();
-      
+
       // Only create default user if the table is completely empty
       if (result.count === 0) {
         const stmt = this.db.prepare(`
           INSERT INTO users (email, display_name, position, bio)
           VALUES (?, ?, ?, ?)
         `);
-        
+
         stmt.run(
           'adminpro@company.com',
           'Admin Pro',
@@ -152,7 +171,7 @@ class DatabaseService {
       // Get the current user count
       const countStmt = this.db.prepare('SELECT COUNT(*) as count FROM users');
       const countResult = countStmt.get();
-      
+
       if (countResult.count === 0) {
         // No user exists, insert new user
         const insertStmt = this.db.prepare(`
@@ -161,7 +180,7 @@ class DatabaseService {
             bio, theme_preference, language
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `);
-        
+
         const info = insertStmt.run(
           userData.email || 'adminpro@company.com',
           userData.displayName || 'Admin Pro',
@@ -172,7 +191,7 @@ class DatabaseService {
           userData.themePreference || 'light',
           userData.language || 'en'
         );
-        
+
         return { id: info.lastInsertRowid, changes: info.changes };
       } else {
         // Always update the first (and only) user
@@ -181,11 +200,11 @@ class DatabaseService {
           console.warn('Multiple users found, cleaning up to maintain single user policy');
           this.cleanupMultipleUsers();
         }
-        
+
         // Get the first user's ID
         const firstUserStmt = this.db.prepare('SELECT id FROM users ORDER BY id LIMIT 1');
         const firstUser = firstUserStmt.get();
-        
+
         // Update the single user record
         const updateStmt = this.db.prepare(`
           UPDATE users SET
@@ -200,7 +219,7 @@ class DatabaseService {
             updated_at = CURRENT_TIMESTAMP
           WHERE id = ?
         `);
-        
+
         const info = updateStmt.run(
           userData.email || 'adminpro@company.com',
           userData.displayName || 'Admin Pro',
@@ -212,7 +231,7 @@ class DatabaseService {
           userData.language || 'en',
           firstUser.id
         );
-        
+
         return { id: firstUser.id, changes: info.changes };
       }
     } catch (error) {
@@ -227,7 +246,7 @@ class DatabaseService {
       // Get the first user
       const firstUserStmt = this.db.prepare('SELECT * FROM users ORDER BY id LIMIT 1');
       const firstUser = firstUserStmt.get();
-      
+
       if (firstUser) {
         // Delete all other users
         const deleteStmt = this.db.prepare('DELETE FROM users WHERE id != ?');
@@ -260,13 +279,13 @@ class DatabaseService {
       if (!user) {
         throw new Error('No user found to update avatar');
       }
-      
+
       const stmt = this.db.prepare(`
         UPDATE users 
         SET avatar = ?, updated_at = CURRENT_TIMESTAMP 
         WHERE id = ?
       `);
-      
+
       const info = stmt.run(avatarData, user.id);
       return { changes: info.changes };
     } catch (error) {
@@ -293,7 +312,7 @@ class DatabaseService {
         FROM users 
         ORDER BY id LIMIT 1
       `);
-      
+
       return stmt.get();
     } catch (error) {
       console.error('Error getting user settings:', error);
@@ -391,7 +410,7 @@ class DatabaseService {
 
     // Add updated_at timestamp
     fields.push('updated_at = CURRENT_TIMESTAMP');
-    
+
     if (fields.length === 0) {
       return { changes: 0 };
     }
@@ -445,11 +464,11 @@ class DatabaseService {
       // First check if there are any employees in this department
       const checkStmt = this.db.prepare('SELECT COUNT(*) as count FROM employees WHERE department_id = ?');
       const result = checkStmt.get(id);
-      
+
       if (result.count > 0) {
         throw new Error('Cannot delete department that has employees. Please reassign or delete employees first.');
       }
-      
+
       const stmt = this.db.prepare('DELETE FROM departments WHERE id = ?');
       const info = stmt.run(id);
       return { changes: info.changes };
@@ -461,7 +480,7 @@ class DatabaseService {
 
   // Attendance methods
   getTodayAttendance() {
-    const today = new Date().toISOString().split('T')[0];
+    const today = this.getManilaDate();
     const stmt = this.db.prepare(`
       SELECT 
         a.*,
@@ -479,17 +498,22 @@ class DatabaseService {
 
   recordAttendance(attendance) {
     const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO attendance 
+      INSERT INTO attendance 
       (employee_id, date, check_in, check_out, status, notes)
       VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(employee_id, date) DO UPDATE SET
+        check_in = COALESCE(excluded.check_in, attendance.check_in),
+        check_out = COALESCE(excluded.check_out, attendance.check_out),
+        status = COALESCE(excluded.status, attendance.status),
+        notes = COALESCE(excluded.notes, attendance.notes)
     `);
 
     try {
       const info = stmt.run(
         attendance.employee_id,
         attendance.date,
-        attendance.check_in,
-        attendance.check_out,
+        attendance.check_in || null,
+        attendance.check_out || null,
         attendance.status || 'Present',
         attendance.notes || null
       );
@@ -502,13 +526,13 @@ class DatabaseService {
 
   getWeeklyAttendance() {
     try {
-      const today = new Date();
+      const today = new Date(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Manila' }).format(new Date()));
       const startDate = new Date(today);
       startDate.setDate(today.getDate() - 6); // Last 7 days including today
-      
+
       const startDateStr = startDate.toISOString().split('T')[0];
       const endDateStr = today.toISOString().split('T')[0];
-      
+
       const stmt = this.db.prepare(`
         SELECT 
           date(a.date) as date,
@@ -523,21 +547,21 @@ class DatabaseService {
         GROUP BY date(a.date)
         ORDER BY date(a.date) ASC
       `);
-      
+
       const rows = stmt.all(startDateStr, endDateStr);
-      
+
       // Create an array for all 7 days
       const weeklyData = [];
       const currentDate = new Date(startDate);
-      
+
       while (currentDate <= today) {
         const dateStr = currentDate.toISOString().split('T')[0];
         const dayName = currentDate.toLocaleDateString('en-US', { weekday: 'short' });
         const dayNumber = currentDate.getDate();
-        
+
         // Find data for this date
         const dayData = rows.find(row => row.date === dateStr);
-        
+
         weeklyData.push({
           day: dayName,
           date: dateStr,
@@ -547,10 +571,10 @@ class DatabaseService {
           leave: dayData ? dayData.leave : 0,
           total: dayData ? dayData.total : 0
         });
-        
+
         currentDate.setDate(currentDate.getDate() + 1);
       }
-      
+
       return weeklyData;
     } catch (error) {
       console.error('Error getting weekly attendance:', error);
@@ -560,8 +584,8 @@ class DatabaseService {
 
   getTodayAttendanceSummary() {
     try {
-      const today = new Date().toISOString().split('T')[0];
-      
+      const today = this.getManilaDate();
+
       const stmt = this.db.prepare(`
         SELECT 
           COUNT(CASE WHEN a.status = 'Present' THEN 1 END) as present,
@@ -572,9 +596,9 @@ class DatabaseService {
         FROM attendance a
         WHERE date(a.date) = date(?)
       `);
-      
+
       const result = stmt.get(today);
-      
+
       if (result && result.total > 0) {
         const rate = ((result.present / result.total) * 100).toFixed(1);
         return {
@@ -585,7 +609,7 @@ class DatabaseService {
           attendanceRate: `${rate}%`
         };
       }
-      
+
       // Return defaults if no data
       return {
         presentToday: 0,
@@ -611,7 +635,7 @@ class DatabaseService {
       // Calculate start and end dates for the month
       const startDate = `${year}-${month.toString().padStart(2, '0')}-01`;
       const endDate = `${year}-${month.toString().padStart(2, '0')}-31`;
-      
+
       const stmt = this.db.prepare(`
         SELECT 
           e.id as employee_id,
@@ -630,7 +654,7 @@ class DatabaseService {
         GROUP BY e.id
         ORDER BY e.first_name, e.last_name
       `);
-      
+
       return stmt.all(`${year}-${month.toString().padStart(2, '0')}`);
     } catch (error) {
       console.error('Error getting monthly attendance report:', error);
@@ -688,7 +712,7 @@ class DatabaseService {
     try {
       const startDate = `${year}-${month.toString().padStart(2, '0')}-01`;
       const endDate = `${year}-${month.toString().padStart(2, '0')}-31`;
-      
+
       const stmt = this.db.prepare(`
         SELECT 
           p.*,
@@ -702,7 +726,7 @@ class DatabaseService {
         WHERE p.period_start >= date(?) AND p.period_end <= date(?)
         ORDER BY p.period_end DESC, e.last_name
       `);
-      
+
       return stmt.all(startDate, endDate);
     } catch (error) {
       console.error('Error getting payroll summary:', error);
@@ -712,13 +736,13 @@ class DatabaseService {
 
   markPayrollAsPaid(payrollId, paymentDate = null) {
     try {
-      const date = paymentDate || new Date().toISOString().split('T')[0];
+      const date = paymentDate || this.getManilaDate();
       const stmt = this.db.prepare(`
         UPDATE payroll 
         SET status = 'Paid', payment_date = ?
         WHERE id = ?
       `);
-      
+
       const info = stmt.run(date, payrollId);
       return { changes: info.changes };
     } catch (error) {
@@ -731,14 +755,14 @@ class DatabaseService {
     try {
       const startDate = `${year}-${month.toString().padStart(2, '0')}-01`;
       const endDate = `${year}-${month.toString().padStart(2, '0')}-31`;
-      
+
       const stmt = this.db.prepare(`
         SELECT * FROM payroll 
         WHERE employee_id = ? 
           AND period_start >= date(?) 
           AND period_end <= date(?)
       `);
-      
+
       return stmt.get(employeeId, startDate, endDate);
     } catch (error) {
       console.error('Error getting payroll by employee and period:', error);
@@ -750,7 +774,7 @@ class DatabaseService {
     try {
       const startDate = `${year}-${month.toString().padStart(2, '0')}-${isFirstHalf ? '01' : '11'}`;
       const endDate = `${year}-${month.toString().padStart(2, '0')}-${isFirstHalf ? '10' : '25'}`;
-      
+
       const stmt = this.db.prepare(`
         SELECT 
           e.id as employee_id,
@@ -768,7 +792,7 @@ class DatabaseService {
         GROUP BY e.id
         ORDER BY e.first_name, e.last_name
       `);
-      
+
       return stmt.all(startDate, endDate);
     } catch (error) {
       console.error('Error getting attendance for cutoff:', error);
@@ -814,7 +838,7 @@ class DatabaseService {
     try {
       const startDate = `${year}-${month.toString().padStart(2, '0')}-${cutoffType === 'First Half' ? '01' : '11'}`;
       const endDate = `${year}-${month.toString().padStart(2, '0')}-${cutoffType === 'First Half' ? '10' : '25'}`;
-      
+
       const stmt = this.db.prepare(`
         SELECT 
           p.*,
@@ -828,21 +852,21 @@ class DatabaseService {
         WHERE p.period_start = date(?) AND p.period_end = date(?)
         ORDER BY e.last_name
       `);
-      
+
       const result = stmt.all(startDate, endDate);
-      
+
       // Add cutoff_type to results for backward compatibility
       return result.map(row => ({
         ...row,
         cutoff_type: row.cutoff_type || cutoffType
       }));
-      
+
     } catch (error) {
       console.error('Error getting payroll by cutoff:', error);
       // Fallback to query without cutoff_type column
       const startDate = `${year}-${month.toString().padStart(2, '0')}-${cutoffType === 'First Half' ? '01' : '11'}`;
       const endDate = `${year}-${month.toString().padStart(2, '0')}-${cutoffType === 'First Half' ? '10' : '25'}`;
-      
+
       const stmt = this.db.prepare(`
         SELECT 
           p.*,
@@ -856,9 +880,9 @@ class DatabaseService {
         WHERE p.period_start = date(?) AND p.period_end = date(?)
         ORDER BY e.last_name
       `);
-      
+
       const result = stmt.all(startDate, endDate);
-      
+
       // Add cutoff_type for backward compatibility
       return result.map(row => ({
         ...row,
@@ -873,7 +897,7 @@ class DatabaseService {
       const columns = this.db.prepare(`
         PRAGMA table_info(payroll)
       `).all();
-      
+
       const columnNames = columns.map(col => col.name);
 
       // Add cutoff_type if it doesn't exist
@@ -881,25 +905,25 @@ class DatabaseService {
         this.db.exec(`ALTER TABLE payroll ADD COLUMN cutoff_type TEXT DEFAULT 'Full Month'`);
         console.log('Added cutoff_type column to payroll table');
       }
-      
+
       // Add working_days if it doesn't exist
       if (!columnNames.includes('working_days')) {
         this.db.exec(`ALTER TABLE payroll ADD COLUMN working_days INTEGER DEFAULT 24`);
         console.log('Added working_days column to payroll table');
       }
-      
+
       // Add days_present if it doesn't exist
       if (!columnNames.includes('days_present')) {
         this.db.exec(`ALTER TABLE payroll ADD COLUMN days_present INTEGER DEFAULT 24`);
         console.log('Added days_present column to payroll table');
       }
-      
+
       // Add daily_rate if it doesn't exist
       if (!columnNames.includes('daily_rate')) {
         this.db.exec(`ALTER TABLE payroll ADD COLUMN daily_rate REAL DEFAULT 0`);
         console.log('Added daily_rate column to payroll table');
       }
-      
+
       // Add breakdown if it doesn't exist
       if (!columnNames.includes('breakdown')) {
         this.db.exec(`ALTER TABLE payroll ADD COLUMN breakdown TEXT`);
@@ -910,45 +934,45 @@ class DatabaseService {
       const usersColumns = this.db.prepare(`
         PRAGMA table_info(users)
       `).all();
-      
+
       const usersColumnNames = usersColumns.map(col => col.name);
-      
+
       // Add display_name if it doesn't exist
       if (!usersColumnNames.includes('display_name')) {
         this.db.exec(`ALTER TABLE users ADD COLUMN display_name TEXT DEFAULT ''`);
         console.log('Added display_name column to users table');
       }
-      
+
       // Add avatar if it doesn't exist
       if (!usersColumnNames.includes('avatar')) {
         this.db.exec(`ALTER TABLE users ADD COLUMN avatar TEXT`);
         console.log('Added avatar column to users table');
       }
-      
+
       // Add phone if it doesn't exist
       if (!usersColumnNames.includes('phone')) {
         this.db.exec(`ALTER TABLE users ADD COLUMN phone TEXT`);
         console.log('Added phone column to users table');
       }
-      
+
       // Add position if it doesn't exist
       if (!usersColumnNames.includes('position')) {
         this.db.exec(`ALTER TABLE users ADD COLUMN position TEXT`);
         console.log('Added position column to users table');
       }
-      
+
       // Add bio if it doesn't exist
       if (!usersColumnNames.includes('bio')) {
         this.db.exec(`ALTER TABLE users ADD COLUMN bio TEXT`);
         console.log('Added bio column to users table');
       }
-      
+
       // Add theme_preference if it doesn't exist
       if (!usersColumnNames.includes('theme_preference')) {
         this.db.exec(`ALTER TABLE users ADD COLUMN theme_preference TEXT DEFAULT 'light'`);
         console.log('Added theme_preference column to users table');
       }
-      
+
       // Add language if it doesn't exist
       if (!usersColumnNames.includes('language')) {
         this.db.exec(`ALTER TABLE users ADD COLUMN language TEXT DEFAULT 'en'`);

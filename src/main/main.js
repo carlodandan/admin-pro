@@ -45,7 +45,7 @@ function createWindow() {
       sandbox: true,
       defaultFontSize: 12
     },
-    icon: path.join(__dirname, '../../icons/adminpro.ico'),
+    icon: path.join(__dirname, '../../icons/icon.ico'),
     titleBarStyle: 'default',
   });
 
@@ -160,7 +160,7 @@ function showVersionDialog() {
     buttons: buttons,
     defaultId: 0,
     cancelId: 0,
-    icon: path.join(__dirname, '../../icons/adminpro.ico')
+    icon: path.join(__dirname, '../../icons/icon.ico')
   }).then((result) => {
     if (result.response === 1) {
       clipboard.writeText(`Admin Pro v${appVersion}`);
