@@ -99,3 +99,6 @@ commit_msg.txt
 
 # VSCode
 .vscode/
+
+# Planning
+docs/*

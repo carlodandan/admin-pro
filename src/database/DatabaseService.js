@@ -36,6 +36,7 @@ class DatabaseService {
     this.migrateDatabase();
     this.createUsersTable();
     this.initializeDefaultUser();
+    this.migrateEmployeesTable();
   }
 
   createTables() {
@@ -64,6 +65,7 @@ class DatabaseService {
         salary REAL NOT NULL,
         hire_date DATE NOT NULL,
         status TEXT NOT NULL DEFAULT 'Active',
+        pin_code TEXT DEFAULT '1234',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL
@@ -427,6 +429,50 @@ class DatabaseService {
     const stmt = this.db.prepare('DELETE FROM employees WHERE id = ?');
     const info = stmt.run(id);
     return { changes: info.changes };
+  }
+
+  migrateEmployeesTable() {
+    try {
+      const tableInfo = this.db.pragma('table_info(employees)');
+      const hasPinCode = tableInfo.some(column => column.name === 'pin_code');
+
+      if (!hasPinCode) {
+        console.log('Migrating employees table: adding pin_code column...');
+        this.db.exec("ALTER TABLE employees ADD COLUMN pin_code TEXT DEFAULT '1234'");
+        console.log('Migration successful: pin_code column added.');
+      }
+    } catch (error) {
+      console.error('Error migrating employees table:', error);
+    }
+  }
+
+  verifyEmployeePin(employeeId, pin) {
+    try {
+      const stmt = this.db.prepare('SELECT * FROM employees WHERE (id = ? OR company_id = ?) AND pin_code = ?');
+      const employee = stmt.get(employeeId, employeeId, pin);
+
+      if (!employee) return { success: false, message: 'Invalid Employee ID or PIN' };
+      if (employee.status !== 'Active') return { success: false, message: 'Employee is not active' };
+
+      return { success: true, employee };
+    } catch (error) {
+      console.error('Error verifying PIN:', error);
+      return { success: false, message: 'System error during verification' };
+    }
+  }
+
+  getLatestAttendance(employeeId) {
+    try {
+      const today = this.getManilaDate();
+      const stmt = this.db.prepare(`
+        SELECT * FROM attendance 
+        WHERE employee_id = ? AND date = ?
+      `);
+      return stmt.get(employeeId, today);
+    } catch (error) {
+      console.error('Error getting latest attendance:', error);
+      return null;
+    }
   }
 
   // Department methods

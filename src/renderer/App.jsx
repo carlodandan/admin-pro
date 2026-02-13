@@ -11,6 +11,7 @@ import Settings from './pages/Settings';
 import RegistrationPage from './pages/RegistrationPage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import { UserProvider } from './contexts/UserContext';
+import AttendanceKiosk from './pages/AttendanceKiosk';
 
 // Protected Route Component
 const ProtectedRoute = ({ children, isAuthenticated }) => {
@@ -43,10 +44,10 @@ function App() {
     try {
       // First check if system is registered
       const registrationCheck = await window.electronAPI.isSystemRegistered();
-      
+
       if (registrationCheck.success) {
         setIsRegistered(registrationCheck.isRegistered);
-        
+
         // If registered, check if we have a stored token
         const token = localStorage.getItem('authToken');
         if (token) {
@@ -70,13 +71,13 @@ function App() {
     try {
       console.log('Registration data sent to backend:', registrationData);
       const result = await window.electronAPI.registerSystem(registrationData);
-      
+
       console.log('Registration API response:', result);
-      
+
       if (result.success) {
         // Return the success result with the super admin password
-        return { 
-          success: true, 
+        return {
+          success: true,
           superAdminPassword: result.superAdminPassword // Make sure backend returns this
         };
       }
@@ -90,11 +91,11 @@ function App() {
   const handleLogin = async (email, password) => {
     try {
       const result = await window.electronAPI.loginUser(email, password);
-      
+
       if (result.success) {
         // Store authentication data
         localStorage.setItem('authToken', 'authenticated');
-        
+
         // Create user info object
         const userData = {
           email: email,
@@ -104,11 +105,11 @@ function App() {
           position: 'System Administrator',
           department: 'IT Department'
         };
-        
+
         localStorage.setItem('userInfo', JSON.stringify(userData));
         setUserInfo(userData);
         setIsAuthenticated(true);
-        
+
         // Load user profile from database
         try {
           const userSettings = await window.electronAPI.getUserSettings(email);
@@ -125,7 +126,7 @@ function App() {
         } catch (dbError) {
           console.warn('Could not load user settings on login:', dbError);
         }
-        
+
         return { success: true, user: userData };
       }
       return { success: false, error: result.error };
@@ -139,8 +140,8 @@ function App() {
   const handlePasswordReset = async (email, superAdminPassword, newPassword) => {
     try {
       const result = await window.electronAPI.resetAdminPassword(
-        email, 
-        superAdminPassword, 
+        email,
+        superAdminPassword,
         newPassword
       );
       return result;
@@ -182,7 +183,7 @@ function App() {
               )}
             </PublicRoute>
           } />
-          
+
           <Route path="/register" element={
             <PublicRoute isAuthenticated={isAuthenticated}>
               {isRegistered ? (
@@ -192,7 +193,7 @@ function App() {
               )}
             </PublicRoute>
           } />
-          
+
           {/* Add Forgot Password Route */}
           <Route path="/forgot-password" element={
             <PublicRoute isAuthenticated={isAuthenticated}>
@@ -203,11 +204,17 @@ function App() {
               )}
             </PublicRoute>
           } />
-          
+
           {/* Protected Routes */}
+          <Route path="/kiosk" element={
+            <ProtectedRoute isAuthenticated={isAuthenticated}>
+              <AttendanceKiosk />
+            </ProtectedRoute>
+          } />
+
           <Route path="/" element={
             <ProtectedRoute isAuthenticated={isAuthenticated}>
-                <Layout userInfo={userInfo} onLogout={handleLogout} />
+              <Layout userInfo={userInfo} onLogout={handleLogout} />
             </ProtectedRoute>
           }>
             <Route index element={<Navigate to="/dashboard" replace />} />
@@ -218,13 +225,13 @@ function App() {
             <Route path="payroll" element={<Payroll />} />
             <Route path="settings" element={<Settings />} />
           </Route>
-          
+
           {/* Catch all - redirect based on auth status */}
           <Route path="*" element={
-            isAuthenticated ? 
-              <Navigate to="/dashboard" replace /> : 
-              isRegistered ? 
-                <Navigate to="/login" replace /> : 
+            isAuthenticated ?
+              <Navigate to="/dashboard" replace /> :
+              isRegistered ?
+                <Navigate to="/login" replace /> :
                 <Navigate to="/register" replace />
           } />
         </Routes>

@@ -24,7 +24,7 @@ if (require('electron-squirrel-startup')) app.quit();
 function createWindow() {
   // Initialize database (no seeding)
   dbService = new DatabaseService();
-  
+
   // Initialize auth service
   authService = new AuthService();
 
@@ -151,7 +151,7 @@ function createMenu() {
 // Function to show version dialog
 function showVersionDialog() {
   const buttons = ['OK', 'Copy Version'];
-  
+
   dialog.showMessageBox(mainWindow, {
     type: 'info',
     title: 'Admin Pro - Version Information',
@@ -319,7 +319,7 @@ ipcMain.handle('auth:update-company-info', async (event, companyData) => {
         last_updated = ?
       WHERE is_registered = 1
     `);
-    
+
     stmt.run(
       companyData.company_name,
       companyData.company_email,
@@ -327,7 +327,7 @@ ipcMain.handle('auth:update-company-info', async (event, companyData) => {
       companyData.company_contact,
       new Date().toISOString()
     );
-    
+
     return { success: true, message: 'Company information updated' };
   } catch (error) {
     console.error('Error updating company info:', error);
@@ -423,10 +423,10 @@ ipcMain.handle('database:backup', async () => {
     const userDataPath = app.getPath('userData');
     const dbPath = path.join(userDataPath, 'company-admin.sqlite');
     const backupPath = path.join(userDataPath, `company-admin-backup-${Date.now()}.db`);
-    
+
     const fs = require('fs');
     fs.copyFileSync(dbPath, backupPath);
-    
+
     return { success: true, path: backupPath };
   } catch (error) {
     console.error('Database backup error:', error);
@@ -510,6 +510,26 @@ ipcMain.handle('employees:create', async (event, employee) => {
   } catch (error) {
     console.error('Error creating employee:', error);
     throw error;
+  }
+});
+
+// Verify Employee PIN (New)
+ipcMain.handle('employees:verify-pin', async (event, employeeId, pin) => {
+  try {
+    return dbService.verifyEmployeePin(employeeId, pin);
+  } catch (error) {
+    console.error('Error verifying PIN:', error);
+    return { success: false, message: error.message };
+  }
+});
+
+// Get Latest Attendance (New)
+ipcMain.handle('attendance:get-latest', async (event, employeeId) => {
+  try {
+    return dbService.getLatestAttendance(employeeId);
+  } catch (error) {
+    console.error('Error getting latest attendance:', error);
+    return null;
   }
 });
 

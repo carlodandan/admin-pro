@@ -298,6 +298,15 @@ const Attendance = () => {
             <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
             Refresh
           </button>
+
+          <button
+            onClick={() => window.open('#/kiosk', '_self')}
+            className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors shadow-sm ml-2"
+            title="Launch Kiosk Mode"
+          >
+            <Clock size={18} />
+            <span className="hidden md:inline">Kiosk Mode</span>
+          </button>
         </div>
       </div>
 
