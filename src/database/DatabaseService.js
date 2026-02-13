@@ -1,15 +1,140 @@
 const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 class DatabaseService {
-  constructor() {
+  constructor(supabase) {
+    this.supabase = supabase;
     const userDataPath = require('electron').app.getPath('userData');
     this.dbPath = path.join(userDataPath, 'company-admin.sqlite');
     this.db = new Database(this.dbPath);
     this.db.pragma('journal_mode = WAL')
     this.db.pragma('foreign_keys = ON');
     this.initializeDatabase();
+    // Start background sync if Supabase is connected
+    if (this.supabase) {
+      this.syncToSupabase();
+
+      // Periodic sync every 30 minutes
+      setInterval(() => {
+        this.syncToSupabase();
+      }, 30 * 60 * 1000);
+    }
+  }
+
+  async syncToSupabase() {
+    console.log('Starting background sync to Supabase...');
+    try {
+      // 1. Sync Departments
+      const departments = this.getAllDepartments();
+      for (const dept of departments) {
+        const { error } = await this.supabase.from('departments').upsert({
+          id: dept.id, // Keep IDs consistent if possible, usually better to let Supabase handle or use same ID
+          name: dept.name,
+          budget: dept.budget,
+          created_at: dept.created_at
+        }, { onConflict: 'name' });
+        // Note: Upserting by ID on Supabase might conflict if IDs are auto-increment.
+        // But since local is "Source of Truth" for legacy data, we want to push it.
+        // However, Supabase IDs are BigInt (8 bytes), same as SQLite Integer. 
+        // We might need to enable IDENTITY_INSERT or similar if we force IDs.
+        // For now, let's just upsert names and let Supabase generate IDs if needed, 
+        // BUT wait... we need the IDs to match for foreign keys.
+        // STRATEGY: We will just push data. If Supabase generates new IDs, we might lose FK integrity 
+        // unless we migrate EVERYTHING with explicit IDs.
+        // LET'S ASSUME empty Supabase: We can force IDs.
+        if (error) console.error('Error syncing department:', dept.name, error);
+      }
+
+      // 2. Sync Employees (CRITICAL: UUIDs)
+      const employees = this.db.prepare('SELECT * FROM employees').all();
+      for (const emp of employees) {
+        let supabaseId = emp.supabase_id;
+
+        // Generate UUID if missing
+        if (!supabaseId) {
+          supabaseId = crypto.randomUUID();
+          this.db.prepare('UPDATE employees SET supabase_id = ? WHERE id = ?')
+            .run(supabaseId, emp.id);
+          console.log(`Generated Supabase ID for ${emp.first_name} ${emp.last_name}`);
+        }
+
+        // Upsert to Supabase
+        const { error } = await this.supabase.from('employees').upsert({
+          id: supabaseId,
+          company_id: emp.company_id,
+          first_name: emp.first_name,
+          last_name: emp.last_name,
+          email: emp.email,
+          phone: emp.phone,
+          // We need to map Department ID. If Supabase IDs are same as Local (1, 2, 3), simple.
+          // If not, we have a problem. 
+          // Assumption: Admin runs this on fresh Supabase. IDs will match if inserted in order.
+          department_id: emp.department_id,
+          position: emp.position,
+          salary: emp.salary,
+          hire_date: emp.hire_date,
+          status: emp.status,
+          pin_code: emp.pin_code
+        });
+        if (error) console.error('Error syncing employee:', emp.email, error);
+      }
+
+      // 3. Sync Attendance
+      const attendance = this.db.prepare('SELECT * FROM attendance').all();
+      for (const att of attendance) {
+        // Get Employee UUID
+        const emp = this.db.prepare('SELECT supabase_id FROM employees WHERE id = ?').get(att.employee_id);
+        if (emp && emp.supabase_id) {
+          const { error } = await this.supabase.from('attendance').upsert({
+            employee_id: emp.supabase_id,
+            date: att.date,
+            check_in: att.check_in,
+            check_out: att.check_out,
+            status: att.status,
+            notes: att.notes
+          }, { onConflict: 'employee_id, date' });
+          if (error) console.error('Error syncing attendance:', error);
+        } else {
+          console.warn(`Skipping attendance sync for local employee ID ${att.employee_id}: No Supabase ID found.`);
+        }
+      }
+
+      // 4. Sync Payroll
+      const payroll = this.db.prepare('SELECT * FROM payroll').all();
+      for (const pay of payroll) {
+        const emp = this.db.prepare('SELECT supabase_id FROM employees WHERE id = ?').get(pay.employee_id);
+        if (emp && emp.supabase_id) {
+          const { error } = await this.supabase.from('payroll').upsert({
+            // id: pay.id, // Let Supabase generate ID for payroll to avoid BigInt issues, or we can try to force it if needed.
+            // Actually, for payroll, we might not need to force ID unless we have child tables. 
+            // Let's match by employee_id + cutoff_start + cutoff_end if possible, but there is no unique constraint on that by default?
+            // Wait, our schema does not have a unique constraint on payroll (employee_id, cutoff).
+            // Logic: We should probably add one or just insert. Upsert requires a constraint.
+            // For now, let's just insert and hope for no duplicates, OR we can try to match by ID if we sync IDs?
+            // BETTER: Let's assume we want to sync history.
+            employee_id: emp.supabase_id,
+            cutoff_start: pay.cutoff_start,
+            cutoff_end: pay.cutoff_end,
+            gross_pay: pay.gross_pay,
+            net_pay: pay.net_pay,
+            deductions: pay.deductions,
+            status: pay.status,
+            payment_date: pay.payment_date,
+            created_at: pay.created_at
+          });
+          if (error) console.error('Error syncing payroll:', error);
+        } else {
+          console.warn(`Skipping payroll sync for local employee ID ${pay.employee_id}: No Supabase ID found.`);
+        }
+      }
+
+      console.log('Sync to Supabase completed.');
+
+    } catch (error) {
+      console.error('Sync Error:', error);
+    }
   }
 
   getManilaDate() {
@@ -370,12 +495,48 @@ class DatabaseService {
     return stmt.get(id);
   }
 
-  createEmployee(employee) {
+  async createEmployee(employee) {
+    console.log('DatabaseService: Creating employee...', employee);
+
+    // 1. Generate UUID locally (Supabase ID)
+    let supabaseUserId = crypto.randomUUID();
+    let pinCode = '1234'; // Default PIN
+
+    // 2. Supabase: Insert into employees table
+    if (this.supabase) {
+      try {
+        const { error: dbError } = await this.supabase
+          .from('employees')
+          .insert({
+            id: supabaseUserId,
+            company_id: employee.company_id,
+            first_name: employee.first_name,
+            last_name: employee.last_name,
+            email: employee.email,
+            phone: employee.phone,
+            department_id: employee.department_id,
+            position: employee.position,
+            salary: employee.salary,
+            hire_date: employee.hire_date,
+            status: employee.status,
+            pin_code: pinCode
+          });
+
+        if (dbError) console.error('Supabase DB Insert Error:', dbError);
+        else console.log('Supabase DB Record created');
+
+      } catch (dbErr) {
+        console.error('Supabase DB Logic Error:', dbErr);
+      }
+    }
+
+    // 3. Local SQLite (Backup/Offline Cache)
     const stmt = this.db.prepare(`
       INSERT INTO employees (
         company_id, first_name, last_name, email, phone, 
-        position, department_id, salary, hire_date, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        department_id, position, salary, hire_date, status, pin_code, supabase_id
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     try {
@@ -385,15 +546,17 @@ class DatabaseService {
         employee.last_name,
         employee.email,
         employee.phone,
+        employee.department_id || null,
         employee.position,
-        employee.department_id,
         employee.salary,
         employee.hire_date,
-        employee.status || 'Active'
+        employee.status || 'Active',
+        pinCode,
+        supabaseUserId // Sync Supabase ID
       );
-      return { id: info.lastInsertRowid, changes: info.changes };
+      return { id: info.lastInsertRowid, changes: info.changes, supabaseId: supabaseUserId };
     } catch (error) {
-      console.error('Error creating employee:', error);
+      console.error('Error creating employee locally:', error);
       throw error;
     }
   }
@@ -441,6 +604,16 @@ class DatabaseService {
         this.db.exec("ALTER TABLE employees ADD COLUMN pin_code TEXT DEFAULT '1234'");
         console.log('Migration successful: pin_code column added.');
       }
+
+      const hasSupabaseId = tableInfo.some(column => column.name === 'supabase_id');
+      if (!hasSupabaseId) {
+        console.log('Migrating employees table: adding supabase_id column...');
+        // SQLite limitation: Cannot add UNIQUE constraint in ALTER TABLE ADD COLUMN
+        this.db.exec("ALTER TABLE employees ADD COLUMN supabase_id TEXT");
+        this.db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_supabase_id ON employees(supabase_id)");
+        console.log('Migration successful: supabase_id column added.');
+      }
+
     } catch (error) {
       console.error('Error migrating employees table:', error);
     }

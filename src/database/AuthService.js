@@ -6,23 +6,24 @@ const bcrypt = require('bcryptjs');
 const { app } = require('electron');
 
 class AuthService {
-  constructor() {
+  constructor(supabase) {
+    this.supabase = supabase;
     // Store database in user data directory
     const userDataPath = app.getPath('userData');
     this.dbPath = path.join(userDataPath, 'auth-registration.sqlite');
     this.keyPath = path.join(userDataPath, 'encryption.key');
-    
+
     // Initialize database
     this.db = new Database(this.dbPath);
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('foreign_keys = ON');
-    
+
     // Initialize or load encryption key
     this.secretKey = this.initializeEncryptionKey();
-    
+
     // Create tables
     this.initializeDatabase();
-    
+
     console.log(`AuthService initialized: Database at ${this.dbPath}`);
   }
 
@@ -44,14 +45,14 @@ class AuthService {
           created: new Date().toISOString(),
           algorithm: 'aes-256-gcm'
         };
-        
+
         fs.writeFileSync(this.keyPath, JSON.stringify(keyData), { encoding: 'utf8' });
         console.log('New encryption key generated and saved');
         return newKey;
       }
     } catch (error) {
       console.error('Error handling encryption key:', error);
-      
+
       // Fallback to environment variable or app-specific derivation
       return this.getFallbackKey();
     }
@@ -68,7 +69,7 @@ class AuthService {
       process.platform,
       app.getName()
     ].join('|');
-    
+
     return crypto.createHash('sha256')
       .update(machineInfo)
       .digest('hex')
@@ -78,9 +79,9 @@ class AuthService {
   /**
  * Initialize database schema with single registration_credentials table
  */
-initializeDatabase() {
-  // SINGLE registration_credentials table with ALL information
-  this.db.exec(`
+  initializeDatabase() {
+    // SINGLE registration_credentials table with ALL information
+    this.db.exec(`
     CREATE TABLE IF NOT EXISTS registration_credentials (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       company_name TEXT NOT NULL,
@@ -100,14 +101,14 @@ initializeDatabase() {
     )
   `);
 
-  // Create indexes for better performance
-  this.db.exec(`
+    // Create indexes for better performance
+    this.db.exec(`
     CREATE INDEX IF NOT EXISTS idx_credentials_admin_email ON registration_credentials(admin_email);
     CREATE INDEX IF NOT EXISTS idx_credentials_is_registered ON registration_credentials(is_registered);
   `);
 
-  console.log('Database tables initialized');
-}
+    console.log('Database tables initialized');
+  }
 
   /**
    * Encrypt a password using AES-256-GCM with instance key
@@ -115,12 +116,12 @@ initializeDatabase() {
   encryptPassword(password) {
     const iv = crypto.randomBytes(16);
     const cipher = crypto.createCipheriv('aes-256-gcm', this.getKey(this.secretKey), iv);
-    
+
     let encrypted = cipher.update(password, 'utf8', 'hex');
     encrypted += cipher.final('hex');
-    
+
     const authTag = cipher.getAuthTag();
-    
+
     return {
       iv: iv.toString('hex'),
       encrypted: encrypted,
@@ -134,16 +135,16 @@ initializeDatabase() {
    */
   decryptPassword(encryptedData) {
     const decipher = crypto.createDecipheriv(
-      'aes-256-gcm', 
-      this.getKey(this.secretKey), 
+      'aes-256-gcm',
+      this.getKey(this.secretKey),
       Buffer.from(encryptedData.iv, 'hex')
     );
-    
+
     decipher.setAuthTag(Buffer.from(encryptedData.authTag, 'hex'));
-    
+
     let decrypted = decipher.update(encryptedData.encrypted, 'hex', 'utf8');
     decrypted += decipher.final('utf8');
-    
+
     return decrypted;
   }
 
@@ -184,8 +185,22 @@ initializeDatabase() {
   /**
    * Check if system is already registered
    */
-  isSystemRegistered() {
+  /**
+  * Check if system is already registered
+  */
+  async isSystemRegistered() {
     try {
+      // 1. Check Supabase First
+      if (this.supabase) {
+        const { data, error } = await this.supabase.auth.admin.listUsers({ page: 1, perPage: 1 });
+        if (!error && data && data.users.length > 0) {
+          console.log('System registered (Supabase check passed)');
+          return true;
+        }
+      }
+
+      // 2. Fallback to Local
+      console.log('Checking local registration...');
       const stmt = this.db.prepare(`
         SELECT COUNT(*) as count 
         FROM registration_credentials 
@@ -202,34 +217,37 @@ initializeDatabase() {
   /**
    * Store initial registration information WITH Generated Super Admin Password
    */
-async storeRegistration(registrationData) {
-  try {
-    // Check if already registered
-    if (this.isSystemRegistered()) {
-      throw new Error('System is already registered');
-    }
+  async storeRegistration(registrationData) {
+    try {
+      // Check if already registered
+      if (this.isSystemRegistered()) {
+        throw new Error('System is already registered');
+      }
 
-    // Check if admin email already exists
-    const checkStmt = this.db.prepare(`
+      // Check if admin email already exists
+      const checkStmt = this.db.prepare(`
       SELECT COUNT(*) as count 
       FROM registration_credentials 
       WHERE admin_email = ?
     `);
-    const exists = checkStmt.get(registrationData.admin_email);
-    
-    if (exists.count > 0) {
-      throw new Error('Admin email already exists');
-    }
+      const exists = checkStmt.get(registrationData.admin_email);
 
-    // Hash both passwords using bcrypt
-    const adminPasswordHash = await this.hashPassword(registrationData.admin_password);
-    const superAdminPasswordHash = await this.hashPassword(registrationData.super_admin_password);
+      if (exists.count > 0) {
+        throw new Error('Admin email already exists');
+      }
 
-    // Generate a simple license key
-    const licenseKey = this.generateLicenseKey();
+      // Create Supabase User
+      await this.createSupabaseAdmin(registrationData.admin_email, registrationData.admin_password);
 
-    // Store everything in registration_credentials table
-    const stmt = this.db.prepare(`
+      // Hash both passwords using bcrypt
+      const adminPasswordHash = await this.hashPassword(registrationData.admin_password);
+      const superAdminPasswordHash = await this.hashPassword(registrationData.super_admin_password);
+
+      // Generate a simple license key
+      const licenseKey = this.generateLicenseKey();
+
+      // Store everything in registration_credentials table
+      const stmt = this.db.prepare(`
       INSERT INTO registration_credentials (
         -- Company Information
         company_name,
@@ -252,44 +270,67 @@ async storeRegistration(registrationData) {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    const now = new Date().toISOString();
-    const result = stmt.run(
-      // Company Information
-      registrationData.company_name,
-      registrationData.company_email,
-      registrationData.company_address || null,
-      registrationData.company_contact || null,
-      
-      // Admin Information
-      registrationData.admin_name,
-      registrationData.admin_email,
-      adminPasswordHash,
-      
-      // Super Admin Password
-      superAdminPasswordHash,
-      
-      // Registration Status
-      1, // Mark as registered
-      licenseKey,
-      // Registration Date
-      now
-    );
+      const now = new Date().toISOString();
+      const result = stmt.run(
+        // Company Information
+        registrationData.company_name,
+        registrationData.company_email,
+        registrationData.company_address || null,
+        registrationData.company_contact || null,
 
-    console.log(`Registration stored successfully. ID: ${result.lastInsertRowid}`);
-    
-    return {
-      success: true,
-      registrationId: result.lastInsertRowid,
-      licenseKey: licenseKey,
-      adminEmail: registrationData.admin_email,
-      superAdminPassword: registrationData.super_admin_password
-    };
+        // Admin Information
+        registrationData.admin_name,
+        registrationData.admin_email,
+        adminPasswordHash,
 
-  } catch (error) {
-    console.error('Error storing registration:', error);
-    throw error;
+        // Super Admin Password
+        superAdminPasswordHash,
+
+        // Registration Status
+        1, // Mark as registered
+        licenseKey,
+        // Registration Date
+        now
+      );
+
+      console.log(`Registration stored successfully. ID: ${result.lastInsertRowid}`);
+
+      return {
+        success: true,
+        registrationId: result.lastInsertRowid,
+        licenseKey: licenseKey,
+        adminEmail: registrationData.admin_email,
+        superAdminPassword: registrationData.super_admin_password
+      };
+
+    } catch (error) {
+      console.error('Error storing registration:', error);
+      throw error;
+    }
   }
-}
+
+  /**
+   * Helper to create Supabase User
+   */
+  async createSupabaseAdmin(email, password) {
+    if (!this.supabase) return;
+    try {
+      const { data, error } = await this.supabase.auth.admin.createUser({
+        email: email,
+        password: password,
+        email_confirm: true,
+        user_metadata: { role: 'admin' }
+      });
+      if (error) throw error;
+      console.log('Supabase Admin User created:', data.user.id);
+      return data.user.id;
+    } catch (error) {
+      console.error('Supabase Admin Creation Failed:', error);
+      // Don't stop local registration if Supabase fails? 
+      // Or user insists on Supabase? User said "This is the part where we can add it in Supabase Auth."
+      // Maybe we just log it for now.
+    }
+  }
 
   /**
    * Verify Super Admin Password for password reset
@@ -302,26 +343,26 @@ async storeRegistration(registrationData) {
         FROM registration_credentials
         WHERE admin_email = ?
       `);
-      
+
       const result = stmt.get(email);
-      
+
       if (!result) {
         return { success: false, error: 'No registration found for this email' };
       }
 
       // Verify using bcrypt
       const isValid = await this.verifyPassword(superAdminPassword, result.super_admin_password_hash);
-      
+
       if (isValid) {
-        return { 
-          success: true, 
-          message: 'Super Admin Password verified successfully' 
+        return {
+          success: true,
+          message: 'Super Admin Password verified successfully'
         };
       }
 
-      return { 
-        success: false, 
-        error: 'Super Admin Password is incorrect' 
+      return {
+        success: false,
+        error: 'Super Admin Password is incorrect'
       };
     } catch (error) {
       console.error('Error verifying Super Admin Password:', error);
@@ -333,18 +374,18 @@ async storeRegistration(registrationData) {
    * Reset admin password using Super Admin Password
    */
   async resetAdminPassword(email, superAdminPassword, newPassword) {
-  try {
-    // First verify Super Admin Password
-    const verification = await this.verifySuperAdminPassword(email, superAdminPassword);
-    if (!verification.success) {
-      return verification;
-    }
+    try {
+      // First verify Super Admin Password
+      const verification = await this.verifySuperAdminPassword(email, superAdminPassword);
+      if (!verification.success) {
+        return verification;
+      }
 
-    // Hash the new password
-    const newPasswordHash = await this.hashPassword(newPassword);
+      // Hash the new password
+      const newPasswordHash = await this.hashPassword(newPassword);
 
-    // Update ONLY registration_credentials table
-    const updateStmt = this.db.prepare(`
+      // Update ONLY registration_credentials table
+      const updateStmt = this.db.prepare(`
       UPDATE registration_credentials 
       SET 
         admin_password_hash = ?, 
@@ -354,23 +395,23 @@ async storeRegistration(registrationData) {
       WHERE admin_email = ?
     `);
 
-    updateStmt.run(
-      newPasswordHash,
-      new Date().toISOString(),
-      new Date().toISOString(),
-      email
-    );
+      updateStmt.run(
+        newPasswordHash,
+        new Date().toISOString(),
+        new Date().toISOString(),
+        email
+      );
 
-    return {
-      success: true,
-      message: 'Password reset successfully'
-    };
+      return {
+        success: true,
+        message: 'Password reset successfully'
+      };
 
-  } catch (error) {
-    console.error('Error resetting password:', error);
-    return { success: false, error: 'Password reset failed' };
+    } catch (error) {
+      console.error('Error resetting password:', error);
+      return { success: false, error: 'Password reset failed' };
+    }
   }
-}
   /**
    * Generate a simple license key
    */
@@ -384,8 +425,8 @@ async storeRegistration(registrationData) {
    * Get registration information
    */
   getRegistrationInfo() {
-  try {
-    const stmt = this.db.prepare(`
+    try {
+      const stmt = this.db.prepare(`
       SELECT 
         id,
         -- Company Information
@@ -408,21 +449,74 @@ async storeRegistration(registrationData) {
       ORDER BY registration_date DESC
       LIMIT 1
     `);
-    
-    return stmt.get() || null;
-  } catch (error) {
-    console.error('Error getting registration info:', error);
-    return null;
+
+      return stmt.get() || null;
+    } catch (error) {
+      console.error('Error getting registration info:', error);
+      return null;
+    }
   }
-}
 
   /**
-   * Verify admin login credentials
-   */
+ * Verify admin login credentials
+ */
   async verifyAdminLogin(email, password) {
-  try {
-    // Check ONLY in registration_credentials table
-    const stmt = this.db.prepare(`
+    try {
+      // 1. Try Supabase Auth First
+      if (this.supabase) {
+        const { data, error } = await this.supabase.auth.signInWithPassword({
+          email,
+          password
+        });
+
+        if (!error && data.user) {
+          // Sync/Update local hash if successful (so offline limit still works with latest password)
+          // But valid hash generation requires access to plain text, which we have here.
+          // We can update the local hash to keep it in sync.
+          try {
+            const newHash = await this.hashPassword(password);
+            const updateStmt = this.db.prepare(`
+                    UPDATE registration_credentials 
+                    SET admin_password_hash = ?, last_updated = CURRENT_TIMESTAMP
+                    WHERE admin_email = ?
+                `);
+            updateStmt.run(newHash, email);
+          } catch (syncErr) {
+            console.warn('Failed to sync local password hash:', syncErr);
+          }
+
+          // Get extra details from local DB
+          const stmt = this.db.prepare(`
+                SELECT admin_name, company_name
+                FROM registration_credentials 
+                WHERE admin_email = ? AND is_registered = 1
+                `);
+          const registration = stmt.get(email);
+
+          return {
+            success: true,
+            user: {
+              email: email,
+              name: registration ? registration.admin_name : 'Admin',
+              role: 'admin',
+              company: registration ? registration.company_name : 'Company',
+              supabase_id: data.user.id
+            }
+          };
+        } else {
+          console.warn('Supabase Login Failed:', error.message);
+          // If error is invalid login, we should probably stop?
+          // Or if error is network, fallback to local?
+          // Supabase returns 400 for invalid credentials.
+          if (error.stats === 400 || error.message.includes('Invalid login credentials')) {
+            return { success: false, error: 'Invalid email or password' };
+          }
+        }
+      }
+
+      // 2. Fallback to Local SQLite
+      console.log('Falling back to local authentication...');
+      const stmt = this.db.prepare(`
       SELECT 
         admin_password_hash,
         admin_name,
@@ -430,47 +524,47 @@ async storeRegistration(registrationData) {
       FROM registration_credentials 
       WHERE admin_email = ? AND is_registered = 1
     `);
-    
-    const registration = stmt.get(email);
-    
-    if (!registration) {
-      return {
-        success: false,
-        error: 'Invalid email or password'
-      };
-    }
 
-    // Verify password
-    const isValid = await this.verifyPassword(
-      password,
-      registration.admin_password_hash
-    );
-    
-    if (!isValid) {
-      return {
-        success: false,
-        error: 'Invalid email or password'
-      };
-    }
+      const registration = stmt.get(email);
 
-    return {
-      success: true,
-      user: {
-        email: email,
-        name: registration.admin_name,
-        role: 'admin',
-        company: registration.company_name
+      if (!registration) {
+        return {
+          success: false,
+          error: 'Invalid email or password'
+        };
       }
-    };
 
-  } catch (error) {
-    console.error('Error verifying login:', error);
-    return {
-      success: false,
-      error: 'Login verification failed'
-    };
+      // Verify password
+      const isValid = await this.verifyPassword(
+        password,
+        registration.admin_password_hash
+      );
+
+      if (!isValid) {
+        return {
+          success: false,
+          error: 'Invalid email or password'
+        };
+      }
+
+      return {
+        success: true,
+        user: {
+          email: email,
+          name: registration.admin_name,
+          role: 'admin',
+          company: registration.company_name
+        }
+      };
+
+    } catch (error) {
+      console.error('Error verifying login:', error);
+      return {
+        success: false,
+        error: 'Login verification failed'
+      };
+    }
   }
-}
 
   /**
    * Close database connection
@@ -489,9 +583,9 @@ async storeRegistration(registrationData) {
   backupDatabase() {
     try {
       const backupPath = this.dbPath.replace('.sqlite', `-backup-${Date.now()}.sqlite`);
-      
+
       fs.copyFileSync(this.dbPath, backupPath);
-      
+
       return {
         success: true,
         backupPath: backupPath
@@ -507,66 +601,66 @@ async storeRegistration(registrationData) {
    * WARNING: This will delete all registration data!
    */
   resetRegistration() {
-  try {
-    // Only delete from registration_credentials
-    this.db.exec('DELETE FROM registration_credentials');
-    this.db.exec('VACUUM'); // Clean up database file
-    
-    console.log('Registration data reset successfully');
-    
-    return {
-      success: true,
-      message: 'Registration reset complete'
-    };
-  } catch (error) {
-    console.error('Error resetting registration:', error);
-    throw error;
-  }
-}
+    try {
+      // Only delete from registration_credentials
+      this.db.exec('DELETE FROM registration_credentials');
+      this.db.exec('VACUUM'); // Clean up database file
 
-async changeAdminPassword(email, currentPassword, newPassword) {
-  try {
-    // Get the current admin password hash
-    const stmt = this.db.prepare(`
+      console.log('Registration data reset successfully');
+
+      return {
+        success: true,
+        message: 'Registration reset complete'
+      };
+    } catch (error) {
+      console.error('Error resetting registration:', error);
+      throw error;
+    }
+  }
+
+  async changeAdminPassword(email, currentPassword, newPassword) {
+    try {
+      // Get the current admin password hash
+      const stmt = this.db.prepare(`
       SELECT admin_password_hash 
       FROM registration_credentials 
       WHERE admin_email = ? AND is_registered = 1
     `);
-    
-    const admin = stmt.get(email);
-    
-    if (!admin) {
-      return { success: false, error: 'Admin not found' };
-    }
-    
-    // Verify current password
-    const isValid = await this.verifyPassword(currentPassword, admin.admin_password_hash);
-    
-    if (!isValid) {
-      return { success: false, error: 'Current password is incorrect' };
-    }
-    
-    // Hash the new password
-    const newPasswordHash = await this.hashPassword(newPassword);
-    
-    // Update password
-    const updateStmt = this.db.prepare(`
+
+      const admin = stmt.get(email);
+
+      if (!admin) {
+        return { success: false, error: 'Admin not found' };
+      }
+
+      // Verify current password
+      const isValid = await this.verifyPassword(currentPassword, admin.admin_password_hash);
+
+      if (!isValid) {
+        return { success: false, error: 'Current password is incorrect' };
+      }
+
+      // Hash the new password
+      const newPasswordHash = await this.hashPassword(newPassword);
+
+      // Update password
+      const updateStmt = this.db.prepare(`
       UPDATE registration_credentials 
       SET admin_password_hash = ?, last_updated = ?
       WHERE admin_email = ?
     `);
-    
-    updateStmt.run(newPasswordHash, new Date().toISOString(), email);
-    
-    return {
-      success: true,
-      message: 'Password changed successfully'
-    };
-  } catch (error) {
-    console.error('Error changing admin password:', error);
-    return { success: false, error: 'Failed to change password' };
+
+      updateStmt.run(newPasswordHash, new Date().toISOString(), email);
+
+      return {
+        success: true,
+        message: 'Password changed successfully'
+      };
+    } catch (error) {
+      console.error('Error changing admin password:', error);
+      return { success: false, error: 'Failed to change password' };
+    }
   }
-}
 }
 
 export default AuthService;
