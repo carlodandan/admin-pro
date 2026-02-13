@@ -2,6 +2,7 @@ import { app, BrowserWindow, Menu, ipcMain, dialog, clipboard } from 'electron';
 import path from 'node:path';
 import DatabaseService from '../database/DatabaseService';
 import AuthService from '../database/AuthService';
+import supabase from './supabase';
 import fs from 'fs';
 
 let mainWindow;
@@ -23,10 +24,10 @@ if (require('electron-squirrel-startup')) app.quit();
 
 function createWindow() {
   // Initialize database (no seeding)
-  dbService = new DatabaseService();
+  dbService = new DatabaseService(supabase);
 
   // Initialize auth service
-  authService = new AuthService();
+  authService = new AuthService(supabase);
 
   // Create the browser window
   mainWindow = new BrowserWindow({
@@ -251,7 +252,7 @@ ipcMain.handle('auth:get-registration-info', async (event) => {
 // Check if system is registered
 ipcMain.handle('auth:is-registered', async (event) => {
   try {
-    const isRegistered = authService.isSystemRegistered();
+    const isRegistered = await authService.isSystemRegistered();
     return { success: true, isRegistered };
   } catch (error) {
     console.error('Error checking registration:', error);
