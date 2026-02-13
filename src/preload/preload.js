@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getEmployeeById: (id) => ipcRenderer.invoke('employees:get-by-id', id),
   updateEmployee: (id, employee) => ipcRenderer.invoke('employees:update', id, employee),
   verifyEmployeePin: (employeeId, pin) => ipcRenderer.invoke('employees:verify-pin', employeeId, pin),
+  updateEmployeePin: (employeeId, newPin) => ipcRenderer.invoke('employees:update-pin', employeeId, newPin),
   getLatestAttendance: (employeeId) => ipcRenderer.invoke('attendance:get-latest', employeeId),
 
   // Events

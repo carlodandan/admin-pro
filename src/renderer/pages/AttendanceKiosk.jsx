@@ -8,9 +8,13 @@ const AttendanceKiosk = () => {
     const [currentTime, setCurrentTime] = useState(new Date());
 
     // States: 'ID' -> 'PIN' -> 'PROCESSING' -> 'RESULT'
+    // Change PIN Mode: 'ID' -> 'OLD_PIN' -> 'NEW_PIN' -> 'CONFIRM_PIN' -> 'PROCESSING_CHANGE' -> 'RESULT'
+    const [mode, setMode] = useState('ATTENDANCE'); // 'ATTENDANCE' or 'CHANGE_PIN'
     const [step, setStep] = useState('ID');
     const [employeeId, setEmployeeId] = useState('');
     const [pin, setPin] = useState('');
+    const [newPin, setNewPin] = useState('');
+    const [confirmPin, setConfirmPin] = useState('');
     const [feedback, setFeedback] = useState(null); // { type: 'success'|'error', message: '', record: null }
 
     // Real-time clock effect
@@ -42,27 +46,45 @@ const AttendanceKiosk = () => {
     const handleKeyPress = (key) => {
         if (step === 'ID') {
             if (employeeId.length < 10) setEmployeeId(prev => prev + key);
-        } else if (step === 'PIN') {
+        } else if (step === 'PIN' || step === 'OLD_PIN') {
             if (pin.length < 6) setPin(prev => prev + key);
+        } else if (step === 'NEW_PIN') {
+            if (newPin.length < 6) setNewPin(prev => prev + key);
+        } else if (step === 'CONFIRM_PIN') {
+            if (confirmPin.length < 6) setConfirmPin(prev => prev + key);
         }
     };
 
     const handleClear = () => {
         if (step === 'ID') {
             setEmployeeId(prev => prev.slice(0, -1));
-        } else if (step === 'PIN') {
+        } else if (step === 'PIN' || step === 'OLD_PIN') {
             setPin(prev => prev.slice(0, -1));
+        } else if (step === 'NEW_PIN') {
+            setNewPin(prev => prev.slice(0, -1));
+        } else if (step === 'CONFIRM_PIN') {
+            setConfirmPin(prev => prev.slice(0, -1));
         }
     };
 
     const handleEnter = async () => {
         if (step === 'ID') {
             if (employeeId.trim().length > 0) {
-                setStep('PIN');
+                if (mode === 'ATTENDANCE') setStep('PIN');
+                else setStep('OLD_PIN');
             }
         } else if (step === 'PIN') {
-            if (pin.trim().length > 0) {
-                await processAttendance();
+            if (pin.trim().length > 0) await processAttendance();
+        } else if (step === 'OLD_PIN') {
+            if (pin.trim().length > 0) setStep('NEW_PIN');
+        } else if (step === 'NEW_PIN') {
+            if (newPin.trim().length >= 4) setStep('CONFIRM_PIN');
+            else alert('PIN must be at least 4 digits');
+        } else if (step === 'CONFIRM_PIN') {
+            if (confirmPin === newPin) await processPinChange();
+            else {
+                alert('PINs do not match');
+                setConfirmPin('');
             }
         }
     };
@@ -139,10 +161,53 @@ const AttendanceKiosk = () => {
         }, 4000);
     };
 
+    const processPinChange = async () => {
+        setStep('PROCESSING');
+
+        try {
+            // 1. Verify old credentials
+            const fullCompanyId = `EMP-${employeeId}`;
+            const verifyResult = await window.electronAPI.verifyEmployeePin(fullCompanyId, pin);
+
+            if (!verifyResult.success) {
+                throw new Error('Invalid Old PIN');
+            }
+
+            const employee = verifyResult.employee;
+
+            // 2. Update PIN
+            const updateResult = await window.electronAPI.updateEmployeePin(employee.id, newPin);
+
+            if (!updateResult.success) throw new Error(updateResult.message);
+
+            setFeedback({
+                type: 'success',
+                message: 'PIN Changed Successfully',
+                employeeName: 'Please use your new PIN next time.',
+                time: ''
+            });
+            setStep('RESULT');
+
+        } catch (error) {
+            setFeedback({
+                type: 'error',
+                message: error.message
+            });
+            setStep('RESULT'); // Show error then retry?
+        }
+
+        setTimeout(() => {
+            resetKiosk();
+        }, 4000);
+    };
+
     const resetKiosk = () => {
+        setMode('ATTENDANCE');
         setStep('ID');
         setEmployeeId('');
         setPin('');
+        setNewPin('');
+        setConfirmPin('');
         setFeedback(null);
     };
 
@@ -169,7 +234,31 @@ const AttendanceKiosk = () => {
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [step, employeeId, pin, navigate]);
+    }, [step, employeeId, pin, newPin, confirmPin, mode, navigate]);
+
+    const getStepTitle = () => {
+        if (step === 'ID') return 'Enter Employee ID';
+        if (step === 'PIN') return 'Enter Secure PIN';
+        if (step === 'OLD_PIN') return 'Enter Current PIN';
+        if (step === 'NEW_PIN') return 'Enter New PIN';
+        if (step === 'CONFIRM_PIN') return 'Confirm New PIN';
+        return '';
+    };
+
+    const getDisplayValue = () => {
+        if (step === 'ID') {
+            return (
+                <span className="flex items-center justify-center gap-1">
+                    <span className="text-slate-500">EMP-</span>
+                    <span>{employeeId || <span className="text-slate-600 opacity-50">######</span>}</span>
+                </span>
+            );
+        }
+        if (step === 'PIN' || step === 'OLD_PIN') return pin ? '•'.repeat(pin.length) : <span className="text-slate-600">PIN Code</span>;
+        if (step === 'NEW_PIN') return newPin ? '•'.repeat(newPin.length) : <span className="text-slate-600">New PIN</span>;
+        if (step === 'CONFIRM_PIN') return confirmPin ? '•'.repeat(confirmPin.length) : <span className="text-slate-600">Confirm PIN</span>;
+        return '';
+    };
 
     return (
         <div className="min-h-screen bg-slate-900 text-white flex flex-col items-center justify-center p-6 relative overflow-hidden">
@@ -191,7 +280,22 @@ const AttendanceKiosk = () => {
                 </div>
 
                 {/* Dynamic Content Area */}
-                <div className="w-full bg-white/10 backdrop-blur-xl rounded-2xl p-8 border border-white/10 shadow-2xl min-h-[400px] flex flex-col justify-center">
+                <div className="w-full bg-white/10 backdrop-blur-xl rounded-2xl p-8 border border-white/10 shadow-2xl min-h-[460px] flex flex-col justify-center relative">
+
+                    {/* Toggle Mode Button (Only visible on ID step) */}
+                    {step === 'ID' && !feedback && (
+                        <div className="absolute top-4 right-4">
+                            <button
+                                onClick={() => setMode(mode === 'ATTENDANCE' ? 'CHANGE_PIN' : 'ATTENDANCE')}
+                                className={`text-xs px-3 py-1 rounded-full border transition-colors ${mode === 'CHANGE_PIN'
+                                        ? 'bg-yellow-500/20 border-yellow-500 text-yellow-300 hover:bg-yellow-500/30'
+                                        : 'bg-white/5 border-white/10 text-slate-400 hover:bg-white/10 hover:text-white'
+                                    }`}
+                            >
+                                {mode === 'ATTENDANCE' ? 'Change PIN' : 'Cancel Change'}
+                            </button>
+                        </div>
+                    )}
 
                     {step === 'PROCESSING' && (
                         <div className="flex flex-col items-center animate-pulse">
@@ -207,7 +311,7 @@ const AttendanceKiosk = () => {
                                     <CheckCircle className="w-20 h-20 text-green-400 mb-4" />
                                     <h2 className="text-2xl font-bold text-white mb-2">{feedback.message}</h2>
                                     <p className="text-xl text-green-300 mb-4">{feedback.employeeName}</p>
-                                    <p className="text-slate-400">Recorded at {feedback.time}</p>
+                                    {feedback.time && <p className="text-slate-400">Recorded at {feedback.time}</p>}
                                 </>
                             ) : (
                                 <>
@@ -225,38 +329,36 @@ const AttendanceKiosk = () => {
                         </div>
                     )}
 
-                    {(step === 'ID' || step === 'PIN') && (
+                    {step !== 'PROCESSING' && step !== 'RESULT' && (
                         <div className="flex flex-col gap-6">
-                            <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center justify-between mb-2 mt-4">
                                 <button
                                     onClick={() => {
-                                        if (step === 'PIN') {
+                                        if (step === 'PIN' || step === 'OLD_PIN') {
                                             setStep('ID');
                                             setPin('');
+                                        } else if (step === 'NEW_PIN') {
+                                            setStep('OLD_PIN');
+                                            setNewPin('');
+                                        } else if (step === 'CONFIRM_PIN') {
+                                            setStep('NEW_PIN');
+                                            setConfirmPin('');
                                         }
                                     }}
-                                    className={`text-sm flex items-center gap-1 ${step === 'PIN' ? 'text-slate-300 hover:text-white' : 'invisible'}`}
+                                    className={`text-sm flex items-center gap-1 ${step !== 'ID' ? 'text-slate-300 hover:text-white' : 'invisible'}`}
                                 >
                                     ← Back
                                 </button>
                                 <span className="text-sm font-medium text-slate-400 uppercase tracking-wider">
-                                    {step === 'ID' ? 'Enter Employee ID' : 'Enter Secure PIN'}
+                                    {getStepTitle()}
                                 </span>
                                 <span className="w-10"></span>
                             </div>
 
                             {/* Display Input */}
-                            <div className="bg-slate-800/50 rounded-xl p-4 text-center border border-slate-700">
+                            <div className={`bg-slate-800/50 rounded-xl p-4 text-center border ${mode === 'CHANGE_PIN' ? 'border-yellow-500/50' : 'border-slate-700'}`}>
                                 <span className="text-3xl font-mono tracking-widest text-white">
-                                    {step === 'ID'
-                                        ? (
-                                            <span className="flex items-center justify-center gap-1">
-                                                <span className="text-slate-500">EMP-</span>
-                                                <span>{employeeId || <span className="text-slate-600 opacity-50">######</span>}</span>
-                                            </span>
-                                        )
-                                        : (pin ? '•'.repeat(pin.length) : <span className="text-slate-600">PIN Code</span>)
-                                    }
+                                    {getDisplayValue()}
                                 </span>
                             </div>
 

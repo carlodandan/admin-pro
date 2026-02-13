@@ -523,6 +523,16 @@ ipcMain.handle('employees:verify-pin', async (event, employeeId, pin) => {
   }
 });
 
+// Update Employee PIN (New)
+ipcMain.handle('employees:update-pin', async (event, employeeId, newPin) => {
+  try {
+    return dbService.updateEmployeePin(employeeId, newPin);
+  } catch (error) {
+    console.error('Error updating PIN:', error);
+    return { success: false, message: error.message };
+  }
+});
+
 // Get Latest Attendance (New)
 ipcMain.handle('attendance:get-latest', async (event, employeeId) => {
   try {

@@ -461,6 +461,20 @@ class DatabaseService {
     }
   }
 
+  updateEmployeePin(employeeId, newPin) {
+    try {
+      const stmt = this.db.prepare('UPDATE employees SET pin_code = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
+      const info = stmt.run(newPin, employeeId);
+
+      if (info.changes === 0) return { success: false, message: 'Employee not found' };
+
+      return { success: true, message: 'PIN updated successfully' };
+    } catch (error) {
+      console.error('Error updating PIN:', error);
+      return { success: false, message: 'Failed to update PIN' };
+    }
+  }
+
   getLatestAttendance(employeeId) {
     try {
       const today = this.getManilaDate();
