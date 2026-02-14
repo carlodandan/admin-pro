@@ -15,6 +15,8 @@ Follow these steps to set up and run the application from scratch.
 -   **Node.js**: v18 or higher.
 -   **Package Manager**: [pnpm](https://pnpm.io/) (recommended) or npm.
 
+# Local Build
+
 ### Installation
 
 1.  **Clone the repository:**
@@ -34,6 +36,12 @@ Follow these steps to set up and run the application from scratch.
     ```bash
     cp .env.example .env
     ```
+    | Variable | Description | Required |
+    |----------|-------------|----------|
+    | `VITE_SUPABASE_URL` | URL of your Supabase project | Yes |
+    | `VITE_SUPABASE_ANONKEY` | Supabase Publishable Key | Yes |
+
+    For more information on how to get these values, please refer to the [SUPABASE_SETUP.md](https://github.com/carlodandan/admin-pro/blob/main/docs/SUPABASE_SETUP.md).
 
 4.  **Start Development Server:**
     ```bash
@@ -50,6 +58,19 @@ pnpm make
 ```
 
 The output files will be located in the `out/` directory.
+
+> **⚠️ Note on Cross-Platform Builds:**
+> This specific configuration is optimized for **Windows**. If you wish to build for macOS or Linux, please refer to the [Electron Forge documentation](https://www.electronforge.io/) to configure the appropriate makers for your target platform.
+
+# Github Workflow (CI/CD)
+
+You can also build without cloning the repository in your local machine by using the Github Workflow. Just make sure to setup your secrets properly.
+
+1. Please refer to the [GITHUB_WORKFLOW.md](https://github.com/carlodandan/admin-pro/blob/main/docs/GITHUB_WORKFLOW.md) on how to set it up.
+
+2. After setting up the secrets, you can run the workflow by clicking on the **Actions** tab > **Build Admin Pro** > **Run workflow**.
+
+3. The output files will be located in the release section of the repository.
 
 > **⚠️ Note on Cross-Platform Builds:**
 > This specific configuration is optimized for **Windows**. If you wish to build for macOS or Linux, please refer to the [Electron Forge documentation](https://www.electronforge.io/) to configure the appropriate makers for your target platform.
@@ -80,17 +101,6 @@ The output files will be located in the `out/` directory.
     -   Local: SQLite (better-sqlite3)
     -   Cloud: Supabase (PostgreSQL)
 -   **Language**: JavaScript (ES6+)
-
-## ⚙️ Configuration
-
-The application uses a `.env` file for configuration.
-
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `VITE_SUPABASE_URL` | URL of your Supabase project | Yes |
-| `VITE_SUPABASE_ANONKEY` | Supabase Publishable Key | Yes |
-
-For more information on how to get these values, please refer to the [SUPABASE_SETUP.md](https://github.com/carlodandan/admin-pro/blob/main/SUPABASE_SETUP.md).
 
 ## 🤝 Contributing
 
