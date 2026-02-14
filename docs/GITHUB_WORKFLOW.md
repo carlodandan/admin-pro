@@ -6,7 +6,7 @@
 
 ## Overview
 
-When building with GitHub Actions, you often need access to sensitive data (API keys, database URLs, etc.) that should **never** be committed to the repository (e.g., inside `.env` files). GitHub provides **Repository Secrets** to inject these values into your workflows securely.
+When building with GitHub Actions, you often need access to sensitive data (API keys, database URLs, etc.) that should **never** be committed to the repository (e.g., inside `.env` files). GitHub provides **Repository Secrets** to inject these values into your workflows securely. But of course, its still better to build backend for handling sensitive data. Baking secrets into the the app still not recommended as someone can still crack the app and get the secrets.
 
 This guide explains how to add secrets and use them in your workflow files.
 
