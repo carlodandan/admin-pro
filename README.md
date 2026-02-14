@@ -3,6 +3,7 @@
 > Company Administration System Application
 
 A robust, offline-first desktop application for managing employees, attendance, and payroll. Built with modern web technologies and wrapped in Electron for a native experience on Windows.
+![Company Admin Pro](https://raw.githubusercontent.com/carlodandan/company-admin-pro/refs/heads/main/images/dashboard.png)
 
 ## 🚀 Quick Start
 
