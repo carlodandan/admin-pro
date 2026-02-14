@@ -61,6 +61,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Dashboard operations
   getRecentActivities: (limit) => ipcRenderer.invoke('dashboard:get-recent-activities', limit),
+  getAnalyticsData: (filters) => ipcRenderer.invoke('analytics:get-data', filters),
 
   // User management
   createUser: (userData) => ipcRenderer.invoke('auth:create-user', userData),

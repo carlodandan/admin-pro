@@ -6,6 +6,7 @@ import Employees from './pages/Employees';
 import Departments from './pages/Departments';
 import Attendance from './pages/Attendance';
 import Payroll from './pages/Payroll';
+import Analytics from './pages/Analytics';
 import LoginPage from './pages/LoginPage';
 import Settings from './pages/Settings';
 import RegistrationPage from './pages/RegistrationPage';
@@ -44,6 +45,16 @@ function App() {
 
   const checkAuthStatus = async () => {
     try {
+      // Force logout on fresh app launch (security: require re-login every time app opens)
+      // sessionStorage persists during the browser session but is cleared when the window closes.
+      // If the sentinel is missing, this is a fresh app launch → clear auth data.
+      if (!sessionStorage.getItem('appSessionActive')) {
+        localStorage.removeItem('authToken');
+        localStorage.removeItem('userInfo');
+        localStorage.removeItem('loginTimestamp');
+        sessionStorage.setItem('appSessionActive', '1');
+      }
+
       // First check if system is registered
       const registrationCheck = await window.electronAPI.isSystemRegistered();
 
@@ -249,6 +260,7 @@ function App() {
             <Route path="departments" element={<Departments />} />
             <Route path="attendance" element={<Attendance />} />
             <Route path="payroll" element={<Payroll />} />
+            <Route path="analytics" element={<Analytics />} />
             <Route path="settings" element={<Settings />} />
           </Route>
 

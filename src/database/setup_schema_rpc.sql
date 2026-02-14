@@ -93,33 +93,34 @@ BEGIN
   EXECUTE 'ALTER TABLE public.payroll ENABLE ROW LEVEL SECURITY';
   EXECUTE 'ALTER TABLE public.registration_credentials ENABLE ROW LEVEL SECURITY';
 
-  -- Create Policies (Drop first to ensure idempotency)
-  -- 1. Departments
+  -- Clean up ALL known policy names (old + new) to avoid conflicts
+  -- Old naming convention
   EXECUTE 'DROP POLICY IF EXISTS "Allow all for authenticated" ON public.departments';
-  EXECUTE 'CREATE POLICY "Allow all for authenticated" ON public.departments FOR ALL USING (auth.role() = ''authenticated'')';
-
-  -- 2. Employees
   EXECUTE 'DROP POLICY IF EXISTS "Allow all for authenticated" ON public.employees';
-  EXECUTE 'CREATE POLICY "Allow all for authenticated" ON public.employees FOR ALL USING (auth.role() = ''authenticated'')';
-
-  -- 3. Attendance
   EXECUTE 'DROP POLICY IF EXISTS "Allow all for authenticated" ON public.attendance';
-  EXECUTE 'CREATE POLICY "Allow all for authenticated" ON public.attendance FOR ALL USING (auth.role() = ''authenticated'')';
-
-  -- 4. Payroll
   EXECUTE 'DROP POLICY IF EXISTS "Allow all for authenticated" ON public.payroll';
-  EXECUTE 'CREATE POLICY "Allow all for authenticated" ON public.payroll FOR ALL USING (auth.role() = ''authenticated'')';
-
-  -- 5. Registration Credentials
-  -- Allow authenticated users to Read/Update/Insert
   EXECUTE 'DROP POLICY IF EXISTS "Allow all for authenticated" ON public.registration_credentials';
-  EXECUTE 'CREATE POLICY "Allow all for authenticated" ON public.registration_credentials FOR ALL USING (auth.role() = ''authenticated'')';
+  EXECUTE 'DROP POLICY IF EXISTS "Enable read access for authenticated users" ON public.departments';
+  EXECUTE 'DROP POLICY IF EXISTS "Enable read access for authenticated users" ON public.employees';
+  EXECUTE 'DROP POLICY IF EXISTS "Enable read access for authenticated users" ON public.attendance';
+  EXECUTE 'DROP POLICY IF EXISTS "Enable read access for authenticated users" ON public.registration_credentials';
+  EXECUTE 'DROP POLICY IF EXISTS "Enable insert for authenticated users" ON public.registration_credentials';
+  EXECUTE 'DROP POLICY IF EXISTS "Enable update for authenticated users" ON public.registration_credentials';
+  -- New naming convention
+  EXECUTE 'DROP POLICY IF EXISTS "auth_all_departments" ON public.departments';
+  EXECUTE 'DROP POLICY IF EXISTS "auth_all_employees" ON public.employees';
+  EXECUTE 'DROP POLICY IF EXISTS "auth_all_attendance" ON public.attendance';
+  EXECUTE 'DROP POLICY IF EXISTS "auth_all_payroll" ON public.payroll';
+  EXECUTE 'DROP POLICY IF EXISTS "auth_all_registration" ON public.registration_credentials';
+
+  -- Recreate policies with explicit USING + WITH CHECK (required for INSERT)
+  EXECUTE 'CREATE POLICY "auth_all_departments" ON public.departments FOR ALL USING (auth.role() = ''authenticated'') WITH CHECK (auth.role() = ''authenticated'')';
+  EXECUTE 'CREATE POLICY "auth_all_employees" ON public.employees FOR ALL USING (auth.role() = ''authenticated'') WITH CHECK (auth.role() = ''authenticated'')';
+  EXECUTE 'CREATE POLICY "auth_all_attendance" ON public.attendance FOR ALL USING (auth.role() = ''authenticated'') WITH CHECK (auth.role() = ''authenticated'')';
+  EXECUTE 'CREATE POLICY "auth_all_payroll" ON public.payroll FOR ALL USING (auth.role() = ''authenticated'') WITH CHECK (auth.role() = ''authenticated'')';
+  EXECUTE 'CREATE POLICY "auth_all_registration" ON public.registration_credentials FOR ALL USING (auth.role() = ''authenticated'') WITH CHECK (auth.role() = ''authenticated'')';
 
   -- 6. Helper RPC to check for existing admin (Auth)
-  -- This allows the anon key to check if "Any" user exists, to decide if Setup is needed.
-  -- Security Definer allows it to access auth.users.
-  -- UPDATED (v2): Check public.registration_credentials AND ensure linked Auth User exists.
-  -- This handles the case where Auth User was deleted but Public Data remains (orphaned).
   EXECUTE 'CREATE OR REPLACE FUNCTION check_admin_exists_v2() RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER AS $f$ 
     BEGIN 
       RETURN EXISTS (

@@ -29,7 +29,7 @@ const PayrollSummary = () => {
 
       // Filter for the selected month
       const currentMonthPayroll = allPayroll.filter(p => {
-        const payrollDate = new Date(p.period_start);
+        const payrollDate = new Date(p.cutoff_start);
         return payrollDate.getFullYear() === year &&
           (payrollDate.getMonth() + 1) === month;
       });
@@ -48,8 +48,8 @@ const PayrollSummary = () => {
           new Date(payroll.payment_date).toLocaleDateString('en-PH') :
           'Not paid',
         cutoffType: payroll.cutoff_type || 'Full Month',
-        periodStart: payroll.period_start,
-        periodEnd: payroll.period_end
+        periodStart: payroll.cutoff_start,
+        periodEnd: payroll.cutoff_end
       }));
 
       // Calculate totals

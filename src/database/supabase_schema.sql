@@ -1,5 +1,11 @@
+-- ============================================================
+-- Admin Pro – Supabase Schema (run in Supabase SQL Editor)
+-- ============================================================
+
 -- Enable UUID extension
 create extension if not exists "uuid-ossp";
+
+-- ========== TABLES ==========
 
 -- Departments Table
 create table if not exists public.departments (
@@ -11,7 +17,6 @@ create table if not exists public.departments (
 );
 
 -- Employees Table
--- id matches Supabase Auth User ID (uuid)
 create table if not exists public.employees (
   id uuid primary key default uuid_generate_v4(),
   company_id text unique,
@@ -52,28 +57,13 @@ create table if not exists public.payroll (
   gross_pay numeric(15, 2) not null,
   net_pay numeric(15, 2) not null,
   deductions jsonb default '{}'::jsonb,
-  status text default 'Pending', -- Pending, Paid
+  status text default 'Pending',
   payment_date date,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
--- Enable Row Level Security (RLS)
-alter table public.departments enable row level security;
-alter table public.employees enable row level security;
-alter table public.attendance enable row level security;
-alter table public.payroll enable row level security;
-
--- Policies: Allow authenticated users full CRUD access
-drop policy if exists "Enable read access for authenticated users" on public.employees;
-drop policy if exists "Enable read access for authenticated users" on public.departments;
-drop policy if exists "Enable read access for authenticated users" on public.attendance;
-
-create policy "Allow all for authenticated" on public.departments for all using (auth.role() = 'authenticated');
-create policy "Allow all for authenticated" on public.employees for all using (auth.role() = 'authenticated');
-create policy "Allow all for authenticated" on public.attendance for all using (auth.role() = 'authenticated');
-create policy "Allow all for authenticated" on public.payroll for all using (auth.role() = 'authenticated');
-
--- 4. Registration/Profile Table (Maps to Local `registration_credentials`)
+-- Registration/Profile Table
 create table if not exists public.registration_credentials (
   id bigint primary key generated always as identity,
   company_name text not null,
@@ -82,7 +72,6 @@ create table if not exists public.registration_credentials (
   company_contact text,
   admin_name text not null,
   admin_email text not null unique,
-  -- Passwords not synced for security, handled by Auth
   avatar text,
   bio text,
   theme_preference text default 'light',
@@ -94,20 +83,49 @@ create table if not exists public.registration_credentials (
   updated_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
--- Add missing columns to existing schema if needed
-alter table public.payroll add column if not exists updated_at timestamp with time zone default timezone('utc'::text, now()) not null;
+-- ========== ROW LEVEL SECURITY ==========
 
--- Enable RLS
+-- Enable RLS on all tables
+alter table public.departments enable row level security;
+alter table public.employees enable row level security;
+alter table public.attendance enable row level security;
+alter table public.payroll enable row level security;
 alter table public.registration_credentials enable row level security;
 
--- Policies
-drop policy if exists "Enable read access for authenticated users" on public.registration_credentials;
-drop policy if exists "Enable insert for authenticated users" on public.registration_credentials;
-drop policy if exists "Enable update for authenticated users" on public.registration_credentials;
+-- Drop ALL existing policies (clean slate to avoid conflicts)
+do $$
+declare
+  r record;
+begin
+  for r in (
+    select policyname, tablename
+    from pg_policies
+    where schemaname = 'public'
+      and tablename in ('departments','employees','attendance','payroll','registration_credentials')
+  ) loop
+    execute format('drop policy if exists %I on public.%I', r.policyname, r.tablename);
+  end loop;
+end$$;
 
-create policy "Allow all for authenticated" on public.registration_credentials for all using (auth.role() = 'authenticated');
+-- Recreate policies with explicit USING + WITH CHECK for all operations
+create policy "auth_all_departments" on public.departments
+  for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 
--- Function to handle automated `updated_at`
+create policy "auth_all_employees" on public.employees
+  for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+
+create policy "auth_all_attendance" on public.attendance
+  for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+
+create policy "auth_all_payroll" on public.payroll
+  for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+
+create policy "auth_all_registration" on public.registration_credentials
+  for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+
+-- ========== TRIGGERS ==========
+
+-- Function to auto-update updated_at column
 create or replace function public.handle_updated_at()
 returns trigger as $$
 begin
@@ -116,7 +134,14 @@ begin
 end;
 $$ language plpgsql;
 
--- Triggers for updated_at
+-- Drop triggers if they exist (avoid errors on re-run)
+drop trigger if exists handle_updated_at on public.departments;
+drop trigger if exists handle_updated_at on public.employees;
+drop trigger if exists handle_updated_at on public.attendance;
+drop trigger if exists handle_updated_at on public.payroll;
+drop trigger if exists handle_updated_at on public.registration_credentials;
+
+-- Recreate triggers
 create trigger handle_updated_at before update on public.departments
   for each row execute procedure public.handle_updated_at();
 

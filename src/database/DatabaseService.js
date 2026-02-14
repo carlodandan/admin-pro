@@ -155,8 +155,8 @@ class DatabaseService {
       CREATE TABLE IF NOT EXISTS payroll (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         employee_id INTEGER NOT NULL,
-        period_start DATE NOT NULL,
-        period_end DATE NOT NULL,
+        cutoff_start DATE NOT NULL,
+        cutoff_end DATE NOT NULL,
         basic_salary REAL NOT NULL,
         allowances REAL DEFAULT 0,
         deductions REAL DEFAULT 0,
@@ -171,7 +171,7 @@ class DatabaseService {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, -- Added for Sync
         FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
-        UNIQUE(employee_id, period_start, period_end)
+        UNIQUE(employee_id, cutoff_start, cutoff_end)
       )
     `);
 
@@ -181,8 +181,27 @@ class DatabaseService {
       CREATE INDEX IF NOT EXISTS idx_employees_status ON employees(status);
       CREATE INDEX IF NOT EXISTS idx_attendance_date ON attendance(date);
       CREATE INDEX IF NOT EXISTS idx_attendance_employee_date ON attendance(employee_id, date);
-      CREATE INDEX IF NOT EXISTS idx_payroll_period ON payroll(period_start, period_end);
+      CREATE INDEX IF NOT EXISTS idx_payroll_period ON payroll(cutoff_start, cutoff_end);
     `);
+
+    // Migrate old column names if they exist
+    this.migratePayrollColumns();
+  }
+
+  migratePayrollColumns() {
+    try {
+      const tableInfo = this.db.pragma('table_info(payroll)');
+      const hasOldColumns = tableInfo.some(col => col.name === 'period_start');
+      if (hasOldColumns) {
+        console.log('[DB] Migrating payroll columns: period_start/period_end → cutoff_start/cutoff_end');
+        this.db.exec(`ALTER TABLE payroll RENAME COLUMN period_start TO cutoff_start`);
+        this.db.exec(`ALTER TABLE payroll RENAME COLUMN period_end TO cutoff_end`);
+        console.log('[DB] ✅ Payroll column migration complete');
+      }
+    } catch (err) {
+      // Columns may already be renamed or table doesn't exist yet
+      console.warn('[DB] Payroll column migration skipped:', err.message);
+    }
   }
 
 
@@ -803,7 +822,7 @@ class DatabaseService {
   processPayroll(payrollData) {
     const stmt = this.db.prepare(`
       INSERT INTO payroll (
-        employee_id, period_start, period_end, basic_salary,
+        employee_id, cutoff_start, cutoff_end, basic_salary,
         allowances, deductions, net_salary, status, payment_date,
         cutoff_type, working_days, days_present, daily_rate, breakdown
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -811,8 +830,8 @@ class DatabaseService {
 
     const info = stmt.run(
       payrollData.employee_id,
-      payrollData.period_start,
-      payrollData.period_end,
+      payrollData.cutoff_start,
+      payrollData.cutoff_end,
       payrollData.basic_salary,
       payrollData.allowances || 0,
       payrollData.deductions || 0,
@@ -840,7 +859,7 @@ class DatabaseService {
       FROM payroll p
       INNER JOIN employees e ON p.employee_id = e.id
       LEFT JOIN departments d ON e.department_id = d.id
-      ORDER BY p.period_end DESC
+      ORDER BY p.cutoff_end DESC
     `);
     return stmt.all();
   }
@@ -860,8 +879,8 @@ class DatabaseService {
         FROM payroll p
         INNER JOIN employees e ON p.employee_id = e.id
         LEFT JOIN departments d ON e.department_id = d.id
-        WHERE p.period_start >= date(?) AND p.period_end <= date(?)
-        ORDER BY p.period_end DESC, e.last_name
+        WHERE p.cutoff_start >= date(?) AND p.cutoff_end <= date(?)
+        ORDER BY p.cutoff_end DESC, e.last_name
       `);
 
       return stmt.all(startDate, endDate);
@@ -896,8 +915,8 @@ class DatabaseService {
       const stmt = this.db.prepare(`
         SELECT * FROM payroll 
         WHERE employee_id = ? 
-          AND period_start >= date(?) 
-          AND period_end <= date(?)
+          AND cutoff_start >= date(?) 
+          AND cutoff_end <= date(?)
       `);
 
       return stmt.get(employeeId, startDate, endDate);
@@ -941,7 +960,7 @@ class DatabaseService {
     try {
       const stmt = this.db.prepare(`
         INSERT INTO payroll (
-          employee_id, period_start, period_end, basic_salary,
+          employee_id, cutoff_start, cutoff_end, basic_salary,
           allowances, deductions, net_salary, status, payment_date,
           cutoff_type, working_days, days_present, daily_rate, breakdown
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -949,8 +968,8 @@ class DatabaseService {
 
       const info = stmt.run(
         payrollData.employee_id,
-        payrollData.period_start,
-        payrollData.period_end,
+        payrollData.cutoff_start,
+        payrollData.cutoff_end,
         payrollData.basic_salary,
         payrollData.allowances || 0,
         payrollData.deductions || 0,
@@ -986,7 +1005,7 @@ class DatabaseService {
         FROM payroll p
         INNER JOIN employees e ON p.employee_id = e.id
         LEFT JOIN departments d ON e.department_id = d.id
-        WHERE p.period_start = date(?) AND p.period_end = date(?)
+        WHERE p.cutoff_start = date(?) AND p.cutoff_end = date(?)
         ORDER BY e.last_name
       `);
 
@@ -1014,7 +1033,7 @@ class DatabaseService {
         FROM payroll p
         INNER JOIN employees e ON p.employee_id = e.id
         LEFT JOIN departments d ON e.department_id = d.id
-        WHERE p.period_start = date(?) AND p.period_end = date(?)
+        WHERE p.cutoff_start = date(?) AND p.cutoff_end = date(?)
         ORDER BY e.last_name
       `);
 
@@ -1106,11 +1125,11 @@ class DatabaseService {
     try {
       const sql = `
         SELECT * FROM (
-          -- Check-ins
+          -- Attendance: Check-ins
           SELECT 
             'attendance' as type,
             'checked in' as action,
-            (date || ' ' || check_in) as timestamp,
+            (a.date || ' ' || a.check_in) as timestamp,
             e.first_name,
             e.last_name
           FROM attendance a
@@ -1119,11 +1138,11 @@ class DatabaseService {
           
           UNION ALL
           
-          -- Check-outs
+          -- Attendance: Check-outs
           SELECT 
             'attendance' as type,
             'checked out' as action,
-            (date || ' ' || check_out) as timestamp,
+            (a.date || ' ' || a.check_out) as timestamp,
             e.first_name,
             e.last_name
           FROM attendance a
@@ -1132,7 +1151,7 @@ class DatabaseService {
           
           UNION ALL
           
-          -- New Employees
+          -- Employees: Joined
           SELECT 
             'employee' as type,
             'joined the team' as action,
@@ -1140,6 +1159,66 @@ class DatabaseService {
             first_name,
             last_name
           FROM employees
+
+          UNION ALL
+
+          -- Employees: Updated
+          SELECT 
+            'employee' as type,
+            'profile was updated' as action,
+            updated_at as timestamp,
+            first_name,
+            last_name
+          FROM employees
+          WHERE updated_at != created_at
+          
+          UNION ALL
+          
+          -- Departments: Created
+          SELECT 
+            'department' as type,
+            'department "' || name || '" was created' as action,
+            created_at as timestamp,
+            'System' as first_name,
+            '' as last_name
+          FROM departments
+          
+          UNION ALL
+          
+          -- Departments: Updated
+          SELECT 
+            'department' as type,
+            'department "' || name || '" was updated' as action,
+            updated_at as timestamp,
+            'System' as first_name,
+            '' as last_name
+          FROM departments
+          WHERE updated_at != created_at
+          
+          UNION ALL
+          
+          -- Payroll: Processed
+          SELECT 
+            'payroll' as type,
+            'payroll was processed (' || cutoff_start || ' to ' || cutoff_end || ')' as action,
+            p.created_at as timestamp,
+            e.first_name,
+            e.last_name
+          FROM payroll p
+          JOIN employees e ON p.employee_id = e.id
+          
+          UNION ALL
+          
+          -- Payroll: Paid
+          SELECT 
+            'payroll' as type,
+            'payroll was marked as paid' as action,
+            p.payment_date as timestamp,
+            e.first_name,
+            e.last_name
+          FROM payroll p
+          JOIN employees e ON p.employee_id = e.id
+          WHERE p.status = 'Paid' AND p.payment_date IS NOT NULL
         )
         ORDER BY timestamp DESC
         LIMIT ?
@@ -1152,7 +1231,169 @@ class DatabaseService {
     }
   }
 
+  // ============= ANALYTICS METHODS =============
+
+  getAnalyticsData(filters = {}) {
+    try {
+      const { startDate, endDate, departmentId } = filters;
+      return {
+        employeeGrowth: this.getEmployeeGrowthTrend(startDate, endDate),
+        attendanceTrends: this.getAttendanceTrends(startDate, endDate),
+        payrollCostTrends: this.getPayrollCostTrends(startDate, endDate),
+        departmentComparison: this.getDepartmentComparison(),
+        employeeStatusBreakdown: this.getEmployeeStatusBreakdown(departmentId),
+        salaryDistribution: this.getSalaryDistribution(departmentId),
+      };
+    } catch (error) {
+      console.error('Error getting analytics data:', error);
+      throw error;
+    }
+  }
+
+  getEmployeeGrowthTrend(startDate, endDate) {
+    try {
+      let sql = `
+        SELECT 
+          strftime('%Y-%m', created_at) as month,
+          COUNT(*) as count,
+          SUM(CASE WHEN status = 'Active' THEN 1 ELSE 0 END) as active_count
+        FROM employees
+        WHERE 1=1
+      `;
+      const params = [];
+      if (startDate) { sql += ` AND created_at >= ?`; params.push(startDate); }
+      if (endDate) { sql += ` AND created_at <= ?`; params.push(endDate); }
+      sql += ` GROUP BY strftime('%Y-%m', created_at) ORDER BY month ASC`;
+      return this.db.prepare(sql).all(...params);
+    } catch (error) {
+      console.error('Error getting employee growth trend:', error);
+      return [];
+    }
+  }
+
+  getAttendanceTrends(startDate, endDate) {
+    try {
+      let sql = `
+        SELECT 
+          strftime('%Y-%m', date) as month,
+          COUNT(*) as total_records,
+          SUM(CASE WHEN status = 'Present' THEN 1 ELSE 0 END) as present,
+          SUM(CASE WHEN status = 'Absent' THEN 1 ELSE 0 END) as absent,
+          SUM(CASE WHEN status = 'Late' THEN 1 ELSE 0 END) as late,
+          SUM(CASE WHEN status = 'On Leave' THEN 1 ELSE 0 END) as on_leave,
+          ROUND(
+            CAST(SUM(CASE WHEN status = 'Present' THEN 1 ELSE 0 END) AS FLOAT) / 
+            NULLIF(COUNT(*), 0) * 100, 1
+          ) as attendance_rate
+        FROM attendance
+        WHERE 1=1
+      `;
+      const params = [];
+      if (startDate) { sql += ` AND date >= ?`; params.push(startDate); }
+      if (endDate) { sql += ` AND date <= ?`; params.push(endDate); }
+      sql += ` GROUP BY strftime('%Y-%m', date) ORDER BY month ASC`;
+      return this.db.prepare(sql).all(...params);
+    } catch (error) {
+      console.error('Error getting attendance trends:', error);
+      return [];
+    }
+  }
+
+  getPayrollCostTrends(startDate, endDate) {
+    try {
+      let sql = `
+        SELECT 
+          strftime('%Y-%m', cutoff_start) as month,
+          SUM(basic_salary) as total_basic,
+          SUM(allowances) as total_allowances,
+          SUM(deductions) as total_deductions,
+          SUM(net_salary) as total_net,
+          COUNT(DISTINCT employee_id) as employee_count,
+          SUM(CASE WHEN status = 'Paid' THEN 1 ELSE 0 END) as paid_count,
+          SUM(CASE WHEN status = 'Pending' THEN 1 ELSE 0 END) as pending_count
+        FROM payroll
+        WHERE 1=1
+      `;
+      const params = [];
+      if (startDate) { sql += ` AND cutoff_start >= ?`; params.push(startDate); }
+      if (endDate) { sql += ` AND cutoff_end <= ?`; params.push(endDate); }
+      sql += ` GROUP BY strftime('%Y-%m', cutoff_start) ORDER BY month ASC`;
+      return this.db.prepare(sql).all(...params);
+    } catch (error) {
+      console.error('Error getting payroll cost trends:', error);
+      return [];
+    }
+  }
+
+  getDepartmentComparison() {
+    try {
+      const sql = `
+        SELECT 
+          d.id,
+          d.name,
+          d.budget,
+          COUNT(e.id) as headcount,
+          COALESCE(ROUND(AVG(e.salary), 2), 0) as avg_salary,
+          COALESCE(SUM(e.salary), 0) as total_salary_cost
+        FROM departments d
+        LEFT JOIN employees e ON e.department_id = d.id AND e.status = 'Active'
+        GROUP BY d.id
+        ORDER BY headcount DESC
+      `;
+      return this.db.prepare(sql).all();
+    } catch (error) {
+      console.error('Error getting department comparison:', error);
+      return [];
+    }
+  }
+
+  getEmployeeStatusBreakdown(departmentId) {
+    try {
+      let sql = `
+        SELECT status, COUNT(*) as count
+        FROM employees
+        WHERE 1=1
+      `;
+      const params = [];
+      if (departmentId) { sql += ` AND department_id = ?`; params.push(departmentId); }
+      sql += ` GROUP BY status ORDER BY count DESC`;
+      return this.db.prepare(sql).all(...params);
+    } catch (error) {
+      console.error('Error getting employee status breakdown:', error);
+      return [];
+    }
+  }
+
+  getSalaryDistribution(departmentId) {
+    try {
+      let sql = `
+        SELECT 
+          CASE
+            WHEN salary < 10000 THEN 'Below 10K'
+            WHEN salary >= 10000 AND salary < 20000 THEN '10K-20K'
+            WHEN salary >= 20000 AND salary < 30000 THEN '20K-30K'
+            WHEN salary >= 30000 AND salary < 50000 THEN '30K-50K'
+            WHEN salary >= 50000 AND salary < 75000 THEN '50K-75K'
+            WHEN salary >= 75000 AND salary < 100000 THEN '75K-100K'
+            ELSE '100K+'
+          END as salary_range,
+          COUNT(*) as count,
+          ROUND(AVG(salary), 2) as avg_in_range
+        FROM employees
+        WHERE status = 'Active'
+      `;
+      const params = [];
+      if (departmentId) { sql += ` AND department_id = ?`; params.push(departmentId); }
+      sql += ` GROUP BY salary_range ORDER BY MIN(salary) ASC`;
+      return this.db.prepare(sql).all(...params);
+    } catch (error) {
+      console.error('Error getting salary distribution:', error);
+      return [];
+    }
+  }
+
   createTriggers() {
+
     const tables = ['departments', 'employees', 'attendance', 'payroll', 'registration_credentials'];
 
     tables.forEach(table => {

@@ -693,6 +693,16 @@ ipcMain.handle('dashboard:get-recent-activities', (event, limit) => {
   }
 });
 
+// Analytics
+ipcMain.handle('analytics:get-data', (event, filters) => {
+  try {
+    return dbService.getAnalyticsData(filters);
+  } catch (error) {
+    console.error('Error getting analytics data:', error);
+    throw error;
+  }
+});
+
 //  USER PROFILE IPC HANDLERS 
 
 // Get user profile

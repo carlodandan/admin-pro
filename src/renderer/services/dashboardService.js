@@ -33,7 +33,7 @@ class DashboardService {
       }));
 
       // Get recent activities (simulated - you can create an actual activities table)
-      const recentActivities = this.getRecentActivities(employees);
+      const recentActivities = await this.getRecentActivities();
 
       // Get payroll summary for current month
       const payrollSummary = await this.getCurrentMonthPayroll();

@@ -164,8 +164,8 @@ const Payroll = () => {
       const startDay = isFirstHalf ? '01' : '11';
       const endDay = isFirstHalf ? '10' : '25';
 
-      const period_start = `${year}-${month.toString().padStart(2, '0')}-${startDay}`;
-      const period_end = `${year}-${month.toString().padStart(2, '0')}-${endDay}`;
+      const cutoff_start = `${year}-${month.toString().padStart(2, '0')}-${startDay}`;
+      const cutoff_end = `${year}-${month.toString().padStart(2, '0')}-${endDay}`;
 
       // Process each employee with attendance
       for (const emp of cutoffAttendance) {
@@ -176,8 +176,8 @@ const Payroll = () => {
 
         const payrollData = {
           employee_id: emp.employee_id,
-          period_start,
-          period_end,
+          cutoff_start,
+          cutoff_end,
           basic_salary: breakdown.basicSalary,
           allowances: 0,
           deductions: breakdown.deductions.total,
@@ -214,8 +214,8 @@ const Payroll = () => {
 
         return {
           employee_id: employee.id,
-          period_start: `${selectedPeriod.year}-${selectedPeriod.month.toString().padStart(2, '0')}-01`,
-          period_end: `${selectedPeriod.year}-${selectedPeriod.month.toString().padStart(2, '0')}-${new Date(selectedPeriod.year, selectedPeriod.month, 0).getDate()}`,
+          cutoff_start: `${selectedPeriod.year}-${selectedPeriod.month.toString().padStart(2, '0')}-01`,
+          cutoff_end: `${selectedPeriod.year}-${selectedPeriod.month.toString().padStart(2, '0')}-${new Date(selectedPeriod.year, selectedPeriod.month, 0).getDate()}`,
           basic_salary: employee.salary,
           allowances: breakdown.allowances,
           deductions: breakdown.deductions.total,
@@ -734,7 +734,7 @@ const Payroll = () => {
                       <p className="font-xs text-gray-500">{payroll.position}</p>
                     </td>
                     <td className="py-4 px-4">
-                      {new Date(payroll.period_start).toLocaleDateString('en-PH', { month: 'short', year: 'numeric' })}
+                      {new Date(payroll.cutoff_start).toLocaleDateString('en-PH', { month: 'short', year: 'numeric' })}
                     </td>
                     <td className="py-4 px-4">
                       <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs">
