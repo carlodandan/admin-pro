@@ -166,16 +166,28 @@ class SyncService {
             }
 
             // PUSH (Local -> Cloud) using insert/update
-            console.log(`[Sync][Emps] Local: ${localEmps.length}, Cloud: ${cloudEmps.length}`);
+            // Fetch valid cloud department IDs to validate FK references
+            const { data: currentCloudDepts } = await this.supabase.from('departments').select('id');
+            const validCloudDeptIds = new Set((currentCloudDepts || []).map(d => d.id));
+
+            console.log(`[Sync][Emps] Local: ${localEmps.length}, Cloud: ${cloudEmps.length}, Valid cloud depts: ${validCloudDeptIds.size}`);
             for (const lEmp of localEmps) {
                 const cEmp = cloudMap.get(lEmp.supabase_id);
 
-                // Resolve cloud department_id
+                // Resolve cloud department_id and validate it exists
                 let cloudDeptId = null;
                 if (lEmp.department_id) {
                     const dept = this.db.prepare('SELECT supabase_id FROM departments WHERE id = ?').get(lEmp.department_id);
-                    if (dept && dept.supabase_id) cloudDeptId = parseInt(dept.supabase_id);
-                    else console.warn(`[Sync][Emps] No cloud dept for local dept ${lEmp.department_id}`);
+                    if (dept && dept.supabase_id) {
+                        const candidateId = parseInt(dept.supabase_id);
+                        if (validCloudDeptIds.has(candidateId)) {
+                            cloudDeptId = candidateId;
+                        } else {
+                            console.warn(`[Sync][Emps] Cloud dept ${candidateId} not found in Supabase, setting to null`);
+                        }
+                    } else {
+                        console.warn(`[Sync][Emps] No cloud dept for local dept ${lEmp.department_id}`);
+                    }
                 }
 
                 const empPayload = {
@@ -260,8 +272,18 @@ class SyncService {
             }
 
             // PUSH (Local -> Cloud) using insert/update
-            console.log(`[Sync][Att] Local: ${localAtt.length}, Cloud: ${cloudAtt.length}`);
+            // Fetch valid cloud employee IDs to validate FK references
+            const { data: currentCloudEmps } = await this.supabase.from('employees').select('id');
+            const validCloudEmpIds = new Set((currentCloudEmps || []).map(e => e.id));
+
+            console.log(`[Sync][Att] Local: ${localAtt.length}, Cloud: ${cloudAtt.length}, Valid cloud emps: ${validCloudEmpIds.size}`);
             for (const lAtt of localAtt) {
+                // Skip if employee doesn't exist in cloud yet
+                if (!validCloudEmpIds.has(lAtt.emp_uuid)) {
+                    console.warn(`[Sync][Att] Skipping ${lAtt.emp_uuid}_${lAtt.date} — employee not in cloud`);
+                    continue;
+                }
+
                 const key = getAttKey(lAtt.emp_uuid, lAtt.date);
                 const cAtt = cloudMap.get(key);
 
@@ -344,9 +366,18 @@ class SyncService {
             }
 
             // PUSH (Local -> Cloud) using insert/update
-            // Map local column names -> Supabase column names
-            console.log(`[Sync][Pay] Local: ${localPay.length}, Cloud: ${cloudPay.length}`);
+            // Fetch valid cloud employee IDs to validate FK references
+            const { data: currentCloudEmps } = await this.supabase.from('employees').select('id');
+            const validCloudEmpIds = new Set((currentCloudEmps || []).map(e => e.id));
+
+            console.log(`[Sync][Pay] Local: ${localPay.length}, Cloud: ${cloudPay.length}, Valid cloud emps: ${validCloudEmpIds.size}`);
             for (const lPay of localPay) {
+                // Skip if employee doesn't exist in cloud yet
+                if (!validCloudEmpIds.has(lPay.emp_uuid)) {
+                    console.warn(`[Sync][Pay] Skipping ${lPay.emp_uuid} — employee not in cloud`);
+                    continue;
+                }
+
                 const key = getPayKey(lPay.emp_uuid, lPay.cutoff_start, lPay.cutoff_end);
                 const cPay = cloudMap.get(key);
 
