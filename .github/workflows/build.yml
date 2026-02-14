@@ -59,15 +59,15 @@ jobs:
         with:
           files: |
             out/make/squirrel.windows/x64/*
-        name: Admin Pro - Windows 64-bit || ${{ env.BUILD_DATE }}
-        tag_name: ap-${{ env.COMMIT_ID }}
-        body: |
-          Build: Windows 64-bit (using Squirrel.Windows)
-          Version: ${{ env.APP_VERSION }}
-          Commit: Most recent [commit](https://github.com/carlodandan/admin-pro/commit/${{ env.COMMIT_ID }}) during building process.
-          
-          Major Dependencies:
-          - Vite: ${{ env.VITE_VER }}
-          - Electron: ${{ env.ELECTRON_VER }}
-          - React: ${{ env.REACT_VER }}
-          - Tailwind CSS: ${{ env.TAILWIND_VER }}
+          name: Admin Pro - Windows 64-bit || ${{ env.BUILD_DATE }}
+          tag_name: ap-${{ env.COMMIT_ID }}
+          body: |
+            Build: Windows 64-bit (using Squirrel.Windows)
+            Version: ${{ env.APP_VERSION }}
+            Commit: Most recent [commit](https://github.com/carlodandan/admin-pro/commit/${{ env.COMMIT_ID }}) during building process.
+            
+            Major Dependencies:
+            - Vite: ${{ env.VITE_VER }}
+            - Electron: ${{ env.ELECTRON_VER }}
+            - React: ${{ env.REACT_VER }}
+            - Tailwind CSS: ${{ env.TAILWIND_VER }}
