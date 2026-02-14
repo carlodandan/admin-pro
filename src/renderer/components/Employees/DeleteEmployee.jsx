@@ -12,17 +12,17 @@ const DeleteEmployee = ({ employeeId, employeeName, onDeleteSuccess, onDeleteErr
     setIsDeleting(true);
 
     try {
-      console.log('Deleting employee ID:', employeeId);
+
       await window.electronAPI.deleteEmployee(employeeId);
-      console.log('Employee deleted successfully');
-      
+
+
       if (onDeleteSuccess) {
         onDeleteSuccess(`Employee "${employeeName}" deleted successfully!`);
       }
     } catch (error) {
       console.error('Error deleting employee:', error);
       const errorMessage = error.message || 'Unknown error occurred';
-      
+
       if (onDeleteError) {
         onDeleteError(`Error deleting employee: ${errorMessage}`);
       }
@@ -32,7 +32,7 @@ const DeleteEmployee = ({ employeeId, employeeName, onDeleteSuccess, onDeleteErr
   };
 
   return (
-    <button 
+    <button
       onClick={handleDelete}
       className="p-2 hover:bg-gray-100 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
       disabled={isDeleting}

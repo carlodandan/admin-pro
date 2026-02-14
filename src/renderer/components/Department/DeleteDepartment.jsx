@@ -12,29 +12,29 @@ const DeleteDepartment = ({ departmentId, departmentName, onDeleteSuccess, onDel
     setIsDeleting(true);
 
     try {
-      console.log('Deleting department ID:', departmentId);
-      
+
+
       // Use setTimeout to prevent blocking the main thread
       const result = await Promise.race([
         window.electronAPI.deleteDepartment(departmentId),
-        new Promise((_, reject) => 
+        new Promise((_, reject) =>
           setTimeout(() => reject(new Error('Delete operation timed out')), 10000)
         )
       ]);
-      
-      console.log('Department deleted successfully');
-      
+
+
+
       // Use setTimeout for success callback to prevent blocking
       setTimeout(() => {
         if (onDeleteSuccess) {
           onDeleteSuccess(`Department "${departmentName}" deleted successfully!`);
         }
       }, 0);
-      
+
     } catch (error) {
       console.error('Error deleting department:', error);
       const errorMessage = error.message || 'Unknown error occurred';
-      
+
       // Use setTimeout for error callback to prevent blocking
       setTimeout(() => {
         if (onDeleteError) {
@@ -50,7 +50,7 @@ const DeleteDepartment = ({ departmentId, departmentName, onDeleteSuccess, onDel
   };
 
   return (
-    <button 
+    <button
       onClick={handleDelete}
       className="p-2 hover:bg-gray-100 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
       disabled={isDeleting}

@@ -14,17 +14,17 @@ const EmployeeTable = () => {
   };
 
   const handleViewEmployee = (employeeId) => {
-    console.log('View employee:', employeeId);
+
     alert(`Viewing employee ${employeeId}`);
   };
 
   const handleEditEmployee = (employeeId) => {
-    console.log('Edit employee:', employeeId);
+
     alert(`Editing employee ${employeeId}`);
   };
 
   const handleDeleteEmployee = (employeeId) => {
-    console.log('Delete employee:', employeeId);
+
     if (window.confirm('Are you sure you want to delete this employee?')) {
       alert(`Employee ${employeeId} deleted`);
     }
@@ -105,23 +105,23 @@ const EmployeeTable = () => {
                 </td>
                 <td className="py-4 px-6">
                   <div className="flex items-center gap-2">
-                    <button 
+                    <button
                       onClick={() => handleViewEmployee(employee.id)}
-                      className="p-2 hover:bg-gray-100 rounded-lg" 
+                      className="p-2 hover:bg-gray-100 rounded-lg"
                       title="View Details"
                     >
                       <Eye size={18} className="text-blue-600" />
                     </button>
-                    <button 
+                    <button
                       onClick={() => handleEditEmployee(employee.id)}
-                      className="p-2 hover:bg-gray-100 rounded-lg" 
+                      className="p-2 hover:bg-gray-100 rounded-lg"
                       title="Edit"
                     >
                       <Edit size={18} className="text-green-600" />
                     </button>
-                    <button 
+                    <button
                       onClick={() => handleDeleteEmployee(employee.id)}
-                      className="p-2 hover:bg-gray-100 rounded-lg" 
+                      className="p-2 hover:bg-gray-100 rounded-lg"
                       title="Delete"
                     >
                       <Trash2 size={18} className="text-red-600" />

@@ -219,7 +219,7 @@ ipcMain.handle('auth:change-password', async (event, email, currentPassword, new
 ipcMain.handle('auth:create-user', async (event, userData) => {
   try {
     // This would need to be implemented in AuthService
-    console.log('Create user request:', userData);
+
     return { success: false, error: 'Not implemented yet' };
   } catch (error) {
     console.error('Error creating user:', error);
@@ -263,8 +263,14 @@ ipcMain.handle('auth:is-registered', async (event) => {
 // User login
 ipcMain.handle('auth:login', async (event, email, password) => {
   try {
-    console.log('Login attempt for:', email);
+
     const result = await authService.verifyAdminLogin(email, password);
+
+    // Trigger sync after successful login (user is now authenticated)
+    if (result.success && dbService) {
+      dbService.syncToSupabase().catch(err => console.warn('Post-login sync error:', err));
+    }
+
     return result;
   } catch (error) {
     console.error('Error during login:', error);
@@ -275,8 +281,29 @@ ipcMain.handle('auth:login', async (event, email, password) => {
 // Register system
 ipcMain.handle('auth:register', async (event, registrationData) => {
   try {
-    console.log('Registration request received');
+
     const result = await authService.storeRegistration(registrationData);
+
+    // Sync to User Profile in DatabaseService (Company DB)
+    if (result.success) {
+      try {
+        await dbService.saveUserProfile({
+          email: registrationData.admin_email,
+          displayName: registrationData.admin_name,
+          position: 'System Administrator',
+          bio: 'System administrator with full access to all features.',
+          role: 'Admin',
+          // Default preferences
+          theme_preference: 'light',
+          language: 'en'
+        });
+
+      } catch (syncError) {
+        console.error('Failed to sync registration to user profile:', syncError);
+        // Non-critical, but good to log
+      }
+    }
+
     return { success: true, data: result };
   } catch (error) {
     console.error('Registration error:', error);
@@ -287,7 +314,7 @@ ipcMain.handle('auth:register', async (event, registrationData) => {
 // Reset Admin Password
 ipcMain.handle('auth:reset-admin-password', async (event, email, superAdminPassword, newPassword) => {
   try {
-    console.log('Resetting admin password for:', email);
+
     const result = await authService.resetAdminPassword(email, superAdminPassword, newPassword);
     return result;
   } catch (error) {
@@ -339,7 +366,7 @@ ipcMain.handle('auth:update-company-info', async (event, companyData) => {
 // Verify Super Admin Password
 ipcMain.handle('auth:verify-super-admin', async (event, email, superAdminPassword) => {
   try {
-    console.log('Verifying Super Admin Password for:', email);
+
     const result = await authService.verifySuperAdminPassword(email, superAdminPassword);
     return result;
   } catch (error) {
@@ -504,9 +531,9 @@ ipcMain.handle('departments:get-all', async () => {
 // Create employee
 ipcMain.handle('employees:create', async (event, employee) => {
   try {
-    console.log('Creating employee in main process:', employee);
+
     const result = dbService.createEmployee(employee);
-    console.log('Employee created:', result);
+
     return result;
   } catch (error) {
     console.error('Error creating employee:', error);
@@ -653,6 +680,16 @@ ipcMain.handle('payroll:process', async (event, payrollData) => {
   } catch (error) {
     console.error('Error processing payroll:', error);
     throw error;
+  }
+});
+
+// Dashboard
+ipcMain.handle('dashboard:get-recent-activities', (event, limit) => {
+  try {
+    return dbService.getRecentActivities(limit);
+  } catch (error) {
+    console.error('Error getting recent activities:', error);
+    return [];
   }
 });
 

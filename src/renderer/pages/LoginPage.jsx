@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Mail, Lock, Eye, EyeOff, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { useUser } from '../contexts/UserContext';
 
 const LoginPage = ({ onLogin }) => {
+  const { updateUser } = useUser();
   const [credentials, setCredentials] = useState({
     email: '',
     password: ''
@@ -50,7 +52,7 @@ const LoginPage = ({ onLogin }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     if (!credentials.email || !credentials.password) {
       setError('Please enter both email and password');
       return;
@@ -69,8 +71,19 @@ const LoginPage = ({ onLogin }) => {
       }
 
       const result = await onLogin(credentials.email, credentials.password);
-      
+
       if (result.success) {
+        // Update UserContext immediately
+        if (result.user) {
+          updateUser({
+            email: result.user.email,
+            displayName: result.user.name,
+            position: result.user.position || 'System Administrator',
+            department: result.user.department || 'IT Department',
+            role: result.user.role || 'Admin',
+            company: result.user.company
+          });
+        }
         setSuccess('Login successful! Redirecting...');
       } else {
         setError(result.error || 'Invalid email or password');
@@ -95,7 +108,7 @@ const LoginPage = ({ onLogin }) => {
               <p className="text-gray-900 text-sm mt-2">Registered on {new Date(companyInfo.registered_at).toLocaleDateString()}</p>
             </div>
           )}
-          
+
           <p className="text-gray-900 text-xl my-6">Sign in to your administrator account</p>
         </div>
 

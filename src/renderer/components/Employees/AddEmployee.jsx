@@ -6,7 +6,7 @@ const AddEmployee = ({ isOpen, onClose, onEmployeeAdded }) => {
   const [loadingDepartments, setLoadingDepartments] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  
+
   const [formData, setFormData] = useState({
     first_name: '',
     last_name: '',
@@ -32,13 +32,13 @@ const AddEmployee = ({ isOpen, onClose, onEmployeeAdded }) => {
     try {
       setLoadingDepartments(true);
       const data = await window.electronAPI.getAllDepartments();
-      
+
       if (data && data.length > 0) {
         setDepartments(data.map(dept => ({
           id: dept.id,
           name: dept.name
         })));
-        
+
         // Set default department to first one if not set
         if (!formData.department_id && data.length > 0) {
           setFormData(prev => ({
@@ -68,13 +68,13 @@ const AddEmployee = ({ isOpen, onClose, onEmployeeAdded }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     // Validate department selection
     if (!formData.department_id) {
       setError('Please select a department for the employee');
       return;
     }
-    
+
     setLoading(true);
     setError('');
     setSuccess('');
@@ -82,20 +82,20 @@ const AddEmployee = ({ isOpen, onClose, onEmployeeAdded }) => {
     try {
       // Generate company ID
       const company_id = `EMP-${Date.now().toString().slice(-6)}`;
-      
+
       const employeeData = {
         ...formData,
         company_id,
         salary: parseFloat(formData.salary) || 0
       };
 
-      console.log('Submitting employee:', employeeData);
-      
+
+
       const result = await window.electronAPI.createEmployee(employeeData);
-      
+
       if (result && (result.id || result.changes > 0)) {
         setSuccess('Employee added successfully!');
-        
+
         // Clear form
         setFormData({
           first_name: '',
@@ -143,11 +143,11 @@ const AddEmployee = ({ isOpen, onClose, onEmployeeAdded }) => {
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto">
       {/* Backdrop */}
-      <div 
+      <div
         className="fixed inset-0 bg-gray-950/50 transition-opacity"
         onClick={onClose}
       />
-      
+
       {/* Modal */}
       <div className="flex items-center justify-center min-h-screen p-4">
         <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-2xl">
@@ -179,7 +179,7 @@ const AddEmployee = ({ isOpen, onClose, onEmployeeAdded }) => {
                   {success}
                 </div>
               )}
-              
+
               {error && (
                 <div className="p-3 bg-red-50 text-red-700 rounded-lg border border-red-200">
                   {error}
@@ -420,7 +420,7 @@ const AddEmployee = ({ isOpen, onClose, onEmployeeAdded }) => {
                         Departments Required
                       </p>
                       <p className="text-sm text-blue-700 mt-1">
-                        Make sure to create/add department first, if it does not exist yet. 
+                        Make sure to create/add department first, if it does not exist yet.
                         Employees must be assigned to a department.
                       </p>
                     </div>

@@ -10,7 +10,7 @@ class AuthService {
     this.supabase = supabase;
     // Store database in user data directory
     const userDataPath = app.getPath('userData');
-    this.dbPath = path.join(userDataPath, 'auth-registration.sqlite');
+    this.dbPath = path.join(userDataPath, 'company-admin.sqlite');
     this.keyPath = path.join(userDataPath, 'encryption.key');
 
     // Initialize database
@@ -21,10 +21,10 @@ class AuthService {
     // Initialize or load encryption key
     this.secretKey = this.initializeEncryptionKey();
 
-    // Create tables
-    this.initializeDatabase();
+    // Create tables - Handled by DatabaseService now
+    // this.initializeDatabase();
 
-    console.log(`AuthService initialized: Database at ${this.dbPath}`);
+
   }
 
   /**
@@ -47,7 +47,7 @@ class AuthService {
         };
 
         fs.writeFileSync(this.keyPath, JSON.stringify(keyData), { encoding: 'utf8' });
-        console.log('New encryption key generated and saved');
+
         return newKey;
       }
     } catch (error) {
@@ -76,39 +76,7 @@ class AuthService {
       .slice(0, 64); // 32 bytes in hex
   }
 
-  /**
- * Initialize database schema with single registration_credentials table
- */
-  initializeDatabase() {
-    // SINGLE registration_credentials table with ALL information
-    this.db.exec(`
-    CREATE TABLE IF NOT EXISTS registration_credentials (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      company_name TEXT NOT NULL,
-      company_email TEXT NOT NULL,
-      company_address TEXT,
-      company_contact TEXT,
-      admin_name TEXT NOT NULL,
-      admin_email TEXT NOT NULL UNIQUE,
-      admin_password_hash TEXT NOT NULL,
-      super_admin_password_hash TEXT NOT NULL,
-      is_registered INTEGER DEFAULT 0,
-      license_key TEXT UNIQUE,
-      registration_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      last_reset_date TIMESTAMP,
-      last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      reset_count INTEGER DEFAULT 0
-    )
-  `);
 
-    // Create indexes for better performance
-    this.db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_credentials_admin_email ON registration_credentials(admin_email);
-    CREATE INDEX IF NOT EXISTS idx_credentials_is_registered ON registration_credentials(is_registered);
-  `);
-
-    console.log('Database tables initialized');
-  }
 
   /**
    * Encrypt a password using AES-256-GCM with instance key
@@ -185,22 +153,26 @@ class AuthService {
   /**
    * Check if system is already registered
    */
-  /**
-  * Check if system is already registered
-  */
   async isSystemRegistered() {
     try {
-      // 1. Check Supabase First
+      // 1. Check Supabase First (via Secure RPC)
       if (this.supabase) {
-        const { data, error } = await this.supabase.auth.admin.listUsers({ page: 1, perPage: 1 });
-        if (!error && data && data.users.length > 0) {
-          console.log('System registered (Supabase check passed)');
+        // We use an RPC function because anon key cannot list users
+        // v2: Checks both public.registration_credentials AND auth.users link
+        const { data, error } = await this.supabase.rpc('check_admin_exists_v2');
+
+        if (!error && data === true) {
+
           return true;
+        } else if (error) {
+          // If RPC doesn't exist yet, we might get an error.
+          // In that case, we fall back to local or assume false.
+          console.warn('Supabase registration check failed (RPC error):', error.message);
         }
       }
 
       // 2. Fallback to Local
-      console.log('Checking local registration...');
+
       const stmt = this.db.prepare(`
         SELECT COUNT(*) as count 
         FROM registration_credentials 
@@ -220,7 +192,7 @@ class AuthService {
   async storeRegistration(registrationData) {
     try {
       // Check if already registered
-      if (this.isSystemRegistered()) {
+      if (await this.isSystemRegistered()) {
         throw new Error('System is already registered');
       }
 
@@ -237,7 +209,10 @@ class AuthService {
       }
 
       // Create Supabase User
-      await this.createSupabaseAdmin(registrationData.admin_email, registrationData.admin_password);
+      await this.createSupabaseAdmin(registrationData.admin_email, registrationData.admin_password, {
+        name: registrationData.admin_name,
+        company_name: registrationData.company_name
+      });
 
       // Hash both passwords using bcrypt
       const adminPasswordHash = await this.hashPassword(registrationData.admin_password);
@@ -293,7 +268,7 @@ class AuthService {
         now
       );
 
-      console.log(`Registration stored successfully. ID: ${result.lastInsertRowid}`);
+
 
       return {
         success: true,
@@ -310,25 +285,39 @@ class AuthService {
   }
 
   /**
-   * Helper to create Supabase User
+   * Helper to create Supabase User via SignUp (Anon Key)
    */
-  async createSupabaseAdmin(email, password) {
+  async createSupabaseAdmin(email, password, metadata = {}) {
     if (!this.supabase) return;
     try {
-      const { data, error } = await this.supabase.auth.admin.createUser({
+      // Use signUp instead of admin.createUser
+      const { data, error } = await this.supabase.auth.signUp({
         email: email,
         password: password,
-        email_confirm: true,
-        user_metadata: { role: 'admin' }
+        options: {
+          data: {
+            role: 'admin',
+            ...metadata
+          }
+        }
       });
-      if (error) throw error;
-      console.log('Supabase Admin User created:', data.user.id);
-      return data.user.id;
+
+      if (error) {
+        // If user already exists, we might want to allow it to proceed 
+        // (assuming they own the account and just need to set up local DB)
+        // But strict registration flow usually implies "New System".
+        // However, user said "Check if it exist, do not show setup".
+        // So if we reached here, isSystemRegistered returned False.
+        // IF signUp says "User already registered", then isSystemRegistered failed to detect it?
+        // We throw so storeRegistration catches it.
+        throw error;
+      }
+
+
+      return data.user?.id;
     } catch (error) {
       console.error('Supabase Admin Creation Failed:', error);
-      // Don't stop local registration if Supabase fails? 
-      // Or user insists on Supabase? User said "This is the part where we can add it in Supabase Auth."
-      // Maybe we just log it for now.
+      throw error; // Re-throw to handle in storeRegistration
     }
   }
 
@@ -471,21 +460,73 @@ class AuthService {
 
         if (!error && data.user) {
           // Sync/Update local hash if successful (so offline limit still works with latest password)
-          // But valid hash generation requires access to plain text, which we have here.
-          // We can update the local hash to keep it in sync.
           try {
             const newHash = await this.hashPassword(password);
-            const updateStmt = this.db.prepare(`
-                    UPDATE registration_credentials 
-                    SET admin_password_hash = ?, last_updated = CURRENT_TIMESTAMP
-                    WHERE admin_email = ?
+
+            // Fetch latest profile from Supabase to ensure we have company/admin name
+            const { data: profile, error: profileError } = await this.supabase
+              .from('registration_credentials')
+              .select('*')
+              .eq('admin_email', email)
+              .single();
+
+            if (profile) {
+              // Upsert into local DB
+              const upsertStmt = this.db.prepare(`
+                    INSERT INTO registration_credentials (
+                        company_name, company_email, company_address, company_contact,
+                        admin_name, admin_email, admin_password_hash, super_admin_password_hash,
+                        avatar, bio, theme_preference, language,
+                        is_registered, license_key, registration_date, last_updated, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(admin_email) DO UPDATE SET
+                        company_name = excluded.company_name,
+                        admin_name = excluded.admin_name,
+                        admin_password_hash = excluded.admin_password_hash,
+                        avatar = excluded.avatar,
+                        last_updated = CURRENT_TIMESTAMP,
+                        updated_at = CURRENT_TIMESTAMP
                 `);
-            updateStmt.run(newHash, email);
+
+              upsertStmt.run(
+                profile.company_name, profile.company_email, profile.company_address, profile.company_contact,
+                profile.admin_name, profile.admin_email, newHash, 'OFFLINE_PLACEHOLDER', // Placeholder for Super Admin Hash
+                profile.avatar, profile.bio, profile.theme_preference, profile.language,
+                1, profile.license_key, profile.registration_date, new Date().toISOString(), new Date().toISOString()
+              );
+
+            } else {
+              // Fallback: If profile fetch failed (e.g. RLS or empty table), try to use Auth Metadata to insert minimal record
+              const meta = data.user.user_metadata || {};
+              const fallbackName = meta.name || 'Admin';
+              const fallbackCompany = meta.company_name || 'Company';
+
+              const upsertStmt = this.db.prepare(`
+                    INSERT INTO registration_credentials (
+                        company_name, company_email, company_address, company_contact,
+                        admin_name, admin_email, admin_password_hash, super_admin_password_hash,
+                        avatar, bio, theme_preference, language,
+                        is_registered, license_key, registration_date, last_updated, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(admin_email) DO UPDATE SET
+                        admin_password_hash = excluded.admin_password_hash,
+                        last_updated = CURRENT_TIMESTAMP
+                `);
+
+              upsertStmt.run(
+                fallbackCompany, email, null, null,
+                fallbackName, email, newHash, 'OFFLINE_PLACEHOLDER', // Placeholder for Super Admin Hash
+                null, null, 'light', 'en',
+                1, `OFFLINE-${Date.now()}`, new Date().toISOString(), new Date().toISOString(), new Date().toISOString()
+              );
+              console.warn('Could not fetch Supabase profile, inserted local fallback record from Auth Metadata.');
+            }
+
           } catch (syncErr) {
             console.warn('Failed to sync local password hash:', syncErr);
           }
 
-          // Get extra details from local DB
+          // Get extra details from local DB (now guaranteed to exist if sync worked)
           const stmt = this.db.prepare(`
                 SELECT admin_name, company_name
                 FROM registration_credentials 
@@ -497,7 +538,7 @@ class AuthService {
             success: true,
             user: {
               email: email,
-              name: registration ? registration.admin_name : 'Admin',
+              name: registration ? registration.admin_name : (data.user.user_metadata?.name || 'Admin'),
               role: 'admin',
               company: registration ? registration.company_name : 'Company',
               supabase_id: data.user.id
@@ -515,7 +556,7 @@ class AuthService {
       }
 
       // 2. Fallback to Local SQLite
-      console.log('Falling back to local authentication...');
+
       const stmt = this.db.prepare(`
       SELECT 
         admin_password_hash,
@@ -572,7 +613,7 @@ class AuthService {
   close() {
     if (this.db) {
       this.db.close();
-      console.log('Database connection closed');
+
     }
   }
 
@@ -606,7 +647,7 @@ class AuthService {
       this.db.exec('DELETE FROM registration_credentials');
       this.db.exec('VACUUM'); // Clean up database file
 
-      console.log('Registration data reset successfully');
+
 
       return {
         success: true,

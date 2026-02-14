@@ -30,7 +30,7 @@ const Employees = () => {
       setLoading(true);
       setError('');
       const data = await window.electronAPI.getAllEmployees();
-      console.log('Loaded employees:', data);
+
       setEmployees(data || []);
       calculateStats(data || []);
     } catch (error) {
@@ -81,7 +81,7 @@ const Employees = () => {
     setSuccess(message);
     // Refresh the employee list
     loadEmployees();
-    
+
     // Clear success message after 3 seconds
     setTimeout(() => setSuccess(''), 3000);
   };
@@ -89,7 +89,7 @@ const Employees = () => {
   // Handle delete error
   const handleDeleteError = (errorMessage) => {
     setError(errorMessage);
-    
+
     // Clear error message after 5 seconds
     setTimeout(() => setError(''), 5000);
   };
@@ -97,14 +97,14 @@ const Employees = () => {
   // Transform database employee to UI employee
   const transformEmployeeForUI = (employee) => {
     if (!employee) return null;
-    
+
     const firstName = employee.first_name || '';
     const lastName = employee.last_name || '';
     const fullName = `${firstName} ${lastName}`.trim();
-    
+
     // Generate avatar initials
     const avatarText = (firstName[0] || '') + (lastName[0] || '') || '??';
-    
+
     // Color mapping for avatars based on department
     const department = employee.department_name || 'Unknown';
     const avatarColors = {
@@ -141,13 +141,13 @@ const Employees = () => {
     .map(transformEmployeeForUI)
     .filter(employee => {
       if (!employee) return false;
-      
+
       const matchesSearch = employee.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                           employee.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                           employee.companyId.toLowerCase().includes(searchTerm.toLowerCase());
+        employee.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        employee.companyId.toLowerCase().includes(searchTerm.toLowerCase());
       const matchesDepartment = selectedDepartment === 'All' || employee.department === selectedDepartment;
       const matchesStatus = selectedStatus === 'All' || employee.status === selectedStatus;
-      
+
       return matchesSearch && matchesDepartment && matchesStatus;
     })
     .filter(Boolean); // Remove any null values
@@ -199,13 +199,13 @@ const Employees = () => {
 
   // Handle view employee details
   const handleViewEmployee = (id) => {
-    console.log('View employee details:', id);
+
     // You can implement a modal or navigate to employee detail page
   };
 
   // Handle edit employee
   const handleEditEmployee = (id) => {
-    console.log('Edit employee:', id);
+
     // You can implement edit modal or form
   };
 
@@ -218,14 +218,14 @@ const Employees = () => {
           <p className="text-gray-600 mt-1">Manage all employee information, departments, and roles</p>
         </div>
         <div className="flex gap-3">
-          <button 
+          <button
             className="flex items-center gap-2 px-4 py-2.5 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
             onClick={() => console.log('Export functionality')}
           >
             <Download size={18} />
             Export
           </button>
-          <button 
+          <button
             onClick={handleAddEmployeeClick}
             className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
           >
@@ -241,7 +241,7 @@ const Employees = () => {
           {success}
         </div>
       )}
-      
+
       {error && (
         <div className="p-3 bg-red-50 border border-red-200 rounded text-red-600 text-sm">
           {error}
@@ -264,7 +264,7 @@ const Employees = () => {
             {stats.totalEmployees > 0 ? `${stats.totalEmployees} employees in system` : 'No employees yet'}
           </p>
         </div>
-        
+
         <div className="bg-white p-2 rounded-xl border border-gray-200">
           <div className="flex justify-between items-start">
             <div>
@@ -279,7 +279,7 @@ const Employees = () => {
             {stats.activeToday > 0 ? 'Active employees' : 'No active employees'}
           </p>
         </div>
-        
+
         <div className="bg-white p-2 rounded-xl border border-gray-200">
           <div className="flex justify-between items-start">
             <div>
@@ -294,7 +294,7 @@ const Employees = () => {
             {stats.onLeave > 0 ? 'Employees on leave' : 'No employees on leave'}
           </p>
         </div>
-        
+
         <div className="bg-white p-2 rounded-xl border border-gray-200">
           <div className="flex justify-between items-start">
             <div>
@@ -354,7 +354,7 @@ const Employees = () => {
               ))}
             </select>
 
-            <button 
+            <button
               className="flex items-center gap-2 px-4 py-2.5 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
               onClick={() => console.log('More filters')}
             >
@@ -440,15 +440,15 @@ const Employees = () => {
                         </td>
                         <td className="py-4 px-6">
                           <div className="flex items-center gap-2">
-                            <button 
-                              className="p-2 hover:bg-gray-100 rounded-lg" 
+                            <button
+                              className="p-2 hover:bg-gray-100 rounded-lg"
                               title="View Details"
                               onClick={() => handleViewEmployee(employee.id)}
                             >
                               <Eye size={18} className="text-blue-600 hover:text-blue-700" />
                             </button>
-                            <button 
-                              className="p-2 hover:bg-gray-100 rounded-lg" 
+                            <button
+                              className="p-2 hover:bg-gray-100 rounded-lg"
                               title="Edit"
                               onClick={() => handleEditEmployee(employee.id)}
                             >
@@ -460,7 +460,7 @@ const Employees = () => {
                               onDeleteSuccess={handleDeleteSuccess}
                               onDeleteError={handleDeleteError}
                             />
-                            <button 
+                            <button
                               className="p-2 hover:bg-gray-100 rounded-lg"
                               onClick={() => console.log('More options')}
                             >
@@ -481,7 +481,7 @@ const Employees = () => {
                 Showing {filteredEmployees.length > 0 ? 1 : 0} to {filteredEmployees.length} of {employees.length} employees
               </div>
               <div className="flex gap-2">
-                <button 
+                <button
                   className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                   disabled={true}
                 >
@@ -490,7 +490,7 @@ const Employees = () => {
                 <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
                   1
                 </button>
-                <button 
+                <button
                   className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
                   disabled={true}
                 >
@@ -521,7 +521,7 @@ const Employees = () => {
                 'Marketing': 'bg-purple-500',
                 'Finance': 'bg-pink-500'
               };
-              
+
               return (
                 <div key={index} className="p-4 border border-gray-200 rounded-lg">
                   <div className="flex items-center justify-between mb-2">
@@ -529,7 +529,7 @@ const Employees = () => {
                     <span className="text-lg font-bold">{employeeCount}</span>
                   </div>
                   <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
-                    <div 
+                    <div
                       className={`h-full ${colorMap[dept.name] || 'bg-gray-500'} rounded-full`}
                       style={{ width: `${percentage}%` }}
                     ></div>
@@ -543,7 +543,7 @@ const Employees = () => {
       </div>
 
       {/* Add Employee Modal */}
-      <AddEmployee 
+      <AddEmployee
         isOpen={showAddModal}
         onClose={() => setShowAddModal(false)}
         onEmployeeAdded={handleEmployeeAdded}

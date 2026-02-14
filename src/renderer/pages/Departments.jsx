@@ -11,17 +11,17 @@ const Departments = () => {
   const [success, setSuccess] = useState('');
 
   useEffect(() => {
-    console.log('Departments component mounted, loading data...');
+
     loadDepartments();
   }, []);
 
   const loadDepartments = async () => {
     try {
-      console.log('Loading departments...');
+
       setLoading(true);
       setError(null);
       const data = await window.electronAPI.getAllDepartments();
-      console.log('Departments loaded:', data);
+
       setDepartments(data || []);
     } catch (error) {
       console.error('Error loading departments:', error);
@@ -36,14 +36,14 @@ const Departments = () => {
     setSuccess(message);
     // Reload departments after successful deletion
     loadDepartments();
-    
+
     // Clear success message after 3 seconds
     setTimeout(() => setSuccess(''), 3000);
   };
 
   const handleDeleteError = (errorMessage) => {
     setError(errorMessage);
-    
+
     // Clear error message after 5 seconds
     setTimeout(() => setError(''), 5000);
   };
@@ -69,20 +69,20 @@ const Departments = () => {
           Add Department
         </button>
       </div>
-      
+
       {/* Success and Error Messages */}
       {success && (
         <div className="p-3 bg-green-50 border border-green-200 rounded text-green-600 text-sm">
           {success}
         </div>
       )}
-      
+
       {error && (
         <div className="p-3 bg-red-50 border border-red-200 rounded text-red-600 text-sm">
           {error}
         </div>
       )}
-      
+
       {/* Departments Grid */}
       {loading ? (
         <div className="flex items-center justify-center p-12">

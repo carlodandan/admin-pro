@@ -59,6 +59,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   processBiMonthlyPayroll: (payrollData) => ipcRenderer.invoke('payroll:process-bi-monthly', payrollData),
   processPayroll: (payrollData) => ipcRenderer.invoke('payroll:process', payrollData),
 
+  // Dashboard operations
+  getRecentActivities: (limit) => ipcRenderer.invoke('dashboard:get-recent-activities', limit),
+
   // User management
   createUser: (userData) => ipcRenderer.invoke('auth:create-user', userData),
   getAllUsers: () => ipcRenderer.invoke('auth:get-users'),

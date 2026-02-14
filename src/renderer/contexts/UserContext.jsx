@@ -15,7 +15,7 @@ export const UserProvider = ({ children }) => {
 
   useEffect(() => {
     loadUserProfile();
-    
+
     // Listen for profile updates from Settings page
     const handleProfileUpdate = (event) => {
       if (event.detail) {
@@ -29,7 +29,7 @@ export const UserProvider = ({ children }) => {
         }));
       }
     };
-    
+
     // Listen for avatar updates
     const handleAvatarUpdate = (event) => {
       if (event.detail?.avatar) {
@@ -39,73 +39,82 @@ export const UserProvider = ({ children }) => {
         }));
       }
     };
-    
+
     window.addEventListener('profileUpdated', handleProfileUpdate);
     window.addEventListener('avatarUpdated', handleAvatarUpdate);
-    
+
     return () => {
       window.removeEventListener('profileUpdated', handleProfileUpdate);
       window.removeEventListener('avatarUpdated', handleAvatarUpdate);
     };
   }, []);
 
- const loadUserProfile = async () => {
-  try {
-    const currentUserEmail = getCurrentUserEmail();
-    
-    if (!currentUserEmail) {
-      console.warn('No current user email found, using default');
-      setUser(prev => ({ 
-        ...prev, 
+  const loadUserProfile = async () => {
+    try {
+      const currentUserEmail = getCurrentUserEmail();
+
+      if (!currentUserEmail) {
+        console.warn('No current user email found, using default');
+        setUser(prev => ({
+          ...prev,
+          email: 'adminpro@company.com',
+          displayName: 'Administrator',
+          loading: false
+        }));
+        return;
+      }
+
+      const userData = await window.electronAPI.getUserSettings(currentUserEmail);
+
+      if (userData) {
+        setUser({
+          email: userData.email || currentUserEmail,
+          displayName: userData.displayName || 'Administrator',
+          avatar: userData.avatar || '',
+          position: userData.position || 'System Administrator',
+          role: 'Admin',
+          loading: false
+        });
+      } else {
+        setUser({
+          email: currentUserEmail,
+          displayName: currentUserEmail.split('@')[0],
+          avatar: '',
+          position: 'System Administrator',
+          role: 'Admin',
+          loading: false
+        });
+      }
+    } catch (error) {
+      console.error('Error loading user profile from database:', error);
+      setUser({
         email: 'adminpro@company.com',
         displayName: 'Administrator',
-        loading: false 
-      }));
-      return;
-    }
-
-    const userData = await window.electronAPI.getUserSettings(currentUserEmail);
-    
-    if (userData) {
-      setUser({
-        email: userData.email || currentUserEmail,
-        displayName: userData.displayName || 'Administrator',
-        avatar: userData.avatar || '',
-        position: userData.position || 'System Administrator',
-        role: 'Admin',
-        loading: false
-      });
-    } else {
-      setUser({
-        email: currentUserEmail,
-        displayName: currentUserEmail.split('@')[0],
         avatar: '',
         position: 'System Administrator',
         role: 'Admin',
         loading: false
       });
     }
-  } catch (error) {
-    console.error('Error loading user profile from database:', error);
-    setUser({
-      email: 'adminpro@company.com',
-      displayName: 'Administrator',
-      avatar: '',
-      position: 'System Administrator',
-      role: 'Admin',
-      loading: false
-    });
-  }
-};
+  };
 
   // Helper function to get current user email
   // You'll need to implement this based on your auth system
   const getCurrentUserEmail = () => {
-    // Example: Get from session storage (if you use it)
-    // return sessionStorage.getItem('currentUserEmail');
-    
-    // For now, return a default or implement your auth logic
-    return 'adminpro@company.com';
+    try {
+      // Get from userInfo in localStorage
+      const userInfoStr = localStorage.getItem('userInfo');
+      if (userInfoStr) {
+        const userInfo = JSON.parse(userInfoStr);
+        if (userInfo && userInfo.email) {
+          return userInfo.email;
+        }
+      }
+      return null;
+    } catch (e) {
+      console.error('Error reading user info from storage:', e);
+      return null;
+    }
   };
 
   const updateUser = (updates) => {

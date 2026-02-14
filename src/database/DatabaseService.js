@@ -2,6 +2,7 @@ const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+import SyncService from './SyncService';
 
 class DatabaseService {
   constructor(supabase) {
@@ -11,129 +12,33 @@ class DatabaseService {
     this.db = new Database(this.dbPath);
     this.db.pragma('journal_mode = WAL')
     this.db.pragma('foreign_keys = ON');
+
+    // Initialize Sync Service
+    this.syncService = new SyncService(this.db, this.supabase);
+
     this.initializeDatabase();
+
     // Start background sync if Supabase is connected
     if (this.supabase) {
-      this.syncToSupabase();
-
-      // Periodic sync every 30 minutes
-      setInterval(() => {
-        this.syncToSupabase();
-      }, 30 * 60 * 1000);
+      this.startSync();
     }
   }
 
+  startSync() {
+    // Initial Sync
+    this.syncService.syncAll();
+
+    // Periodic sync every 30 minutes
+    setInterval(() => {
+      this.syncService.syncAll();
+    }, 30 * 60 * 1000);
+  }
+
+  // Legacy syncToSupabase replaced by SyncService
   async syncToSupabase() {
-    console.log('Starting background sync to Supabase...');
-    try {
-      // 1. Sync Departments
-      const departments = this.getAllDepartments();
-      for (const dept of departments) {
-        const { error } = await this.supabase.from('departments').upsert({
-          id: dept.id, // Keep IDs consistent if possible, usually better to let Supabase handle or use same ID
-          name: dept.name,
-          budget: dept.budget,
-          created_at: dept.created_at
-        }, { onConflict: 'name' });
-        // Note: Upserting by ID on Supabase might conflict if IDs are auto-increment.
-        // But since local is "Source of Truth" for legacy data, we want to push it.
-        // However, Supabase IDs are BigInt (8 bytes), same as SQLite Integer. 
-        // We might need to enable IDENTITY_INSERT or similar if we force IDs.
-        // For now, let's just upsert names and let Supabase generate IDs if needed, 
-        // BUT wait... we need the IDs to match for foreign keys.
-        // STRATEGY: We will just push data. If Supabase generates new IDs, we might lose FK integrity 
-        // unless we migrate EVERYTHING with explicit IDs.
-        // LET'S ASSUME empty Supabase: We can force IDs.
-        if (error) console.error('Error syncing department:', dept.name, error);
-      }
-
-      // 2. Sync Employees (CRITICAL: UUIDs)
-      const employees = this.db.prepare('SELECT * FROM employees').all();
-      for (const emp of employees) {
-        let supabaseId = emp.supabase_id;
-
-        // Generate UUID if missing
-        if (!supabaseId) {
-          supabaseId = crypto.randomUUID();
-          this.db.prepare('UPDATE employees SET supabase_id = ? WHERE id = ?')
-            .run(supabaseId, emp.id);
-          console.log(`Generated Supabase ID for ${emp.first_name} ${emp.last_name}`);
-        }
-
-        // Upsert to Supabase
-        const { error } = await this.supabase.from('employees').upsert({
-          id: supabaseId,
-          company_id: emp.company_id,
-          first_name: emp.first_name,
-          last_name: emp.last_name,
-          email: emp.email,
-          phone: emp.phone,
-          // We need to map Department ID. If Supabase IDs are same as Local (1, 2, 3), simple.
-          // If not, we have a problem. 
-          // Assumption: Admin runs this on fresh Supabase. IDs will match if inserted in order.
-          department_id: emp.department_id,
-          position: emp.position,
-          salary: emp.salary,
-          hire_date: emp.hire_date,
-          status: emp.status,
-          pin_code: emp.pin_code
-        });
-        if (error) console.error('Error syncing employee:', emp.email, error);
-      }
-
-      // 3. Sync Attendance
-      const attendance = this.db.prepare('SELECT * FROM attendance').all();
-      for (const att of attendance) {
-        // Get Employee UUID
-        const emp = this.db.prepare('SELECT supabase_id FROM employees WHERE id = ?').get(att.employee_id);
-        if (emp && emp.supabase_id) {
-          const { error } = await this.supabase.from('attendance').upsert({
-            employee_id: emp.supabase_id,
-            date: att.date,
-            check_in: att.check_in,
-            check_out: att.check_out,
-            status: att.status,
-            notes: att.notes
-          }, { onConflict: 'employee_id, date' });
-          if (error) console.error('Error syncing attendance:', error);
-        } else {
-          console.warn(`Skipping attendance sync for local employee ID ${att.employee_id}: No Supabase ID found.`);
-        }
-      }
-
-      // 4. Sync Payroll
-      const payroll = this.db.prepare('SELECT * FROM payroll').all();
-      for (const pay of payroll) {
-        const emp = this.db.prepare('SELECT supabase_id FROM employees WHERE id = ?').get(pay.employee_id);
-        if (emp && emp.supabase_id) {
-          const { error } = await this.supabase.from('payroll').upsert({
-            // id: pay.id, // Let Supabase generate ID for payroll to avoid BigInt issues, or we can try to force it if needed.
-            // Actually, for payroll, we might not need to force ID unless we have child tables. 
-            // Let's match by employee_id + cutoff_start + cutoff_end if possible, but there is no unique constraint on that by default?
-            // Wait, our schema does not have a unique constraint on payroll (employee_id, cutoff).
-            // Logic: We should probably add one or just insert. Upsert requires a constraint.
-            // For now, let's just insert and hope for no duplicates, OR we can try to match by ID if we sync IDs?
-            // BETTER: Let's assume we want to sync history.
-            employee_id: emp.supabase_id,
-            cutoff_start: pay.cutoff_start,
-            cutoff_end: pay.cutoff_end,
-            gross_pay: pay.gross_pay,
-            net_pay: pay.net_pay,
-            deductions: pay.deductions,
-            status: pay.status,
-            payment_date: pay.payment_date,
-            created_at: pay.created_at
-          });
-          if (error) console.error('Error syncing payroll:', error);
-        } else {
-          console.warn(`Skipping payroll sync for local employee ID ${pay.employee_id}: No Supabase ID found.`);
-        }
-      }
-
-      console.log('Sync to Supabase completed.');
-
-    } catch (error) {
-      console.error('Sync Error:', error);
+    // Forward to new service
+    if (this.syncService) {
+      await this.syncService.syncAll();
     }
   }
 
@@ -158,10 +63,39 @@ class DatabaseService {
 
   initializeDatabase() {
     this.createTables();
+    this.createRegistrationTable(); // New Schema
     this.migrateDatabase();
-    this.createUsersTable();
-    this.initializeDefaultUser();
+    // Default user is now created upon registration via main.js
+    // Default user is now created upon registration via main.js
     this.migrateEmployeesTable();
+    this.migrateRegistrationTable();
+    this.migrateSyncSchema(); // Add columns for sync
+    this.createTriggers(); // Add updated_at triggers
+  }
+
+  migrateSyncSchema() {
+    const columnsToAdd = [
+      { table: 'departments', column: 'supabase_id', type: 'TEXT UNIQUE' },
+      { table: 'departments', column: 'updated_at', type: 'DATETIME DEFAULT CURRENT_TIMESTAMP' },
+      { table: 'departments', column: 'updated_at', type: 'DATETIME DEFAULT CURRENT_TIMESTAMP' },
+      { table: 'employees', column: 'supabase_id', type: 'TEXT UNIQUE' },
+      { table: 'attendance', column: 'updated_at', type: 'DATETIME DEFAULT CURRENT_TIMESTAMP' },
+      { table: 'payroll', column: 'updated_at', type: 'DATETIME DEFAULT CURRENT_TIMESTAMP' },
+      { table: 'registration_credentials', column: 'updated_at', type: 'DATETIME DEFAULT CURRENT_TIMESTAMP' }
+    ];
+
+    columnsToAdd.forEach(item => {
+      try {
+        const tableInfo = this.db.pragma(`table_info(${item.table})`);
+        const exists = tableInfo.some(col => col.name === item.column);
+        if (!exists) {
+
+          this.db.prepare(`ALTER TABLE ${item.table} ADD COLUMN ${item.column} ${item.type}`).run();
+        }
+      } catch (e) {
+        console.error(`Error migrating sync schema for ${item.table}.${item.column}:`, e);
+      }
+    });
   }
 
   createTables() {
@@ -171,6 +105,7 @@ class DatabaseService {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL UNIQUE,
         budget REAL NOT NULL,
+        supabase_id TEXT UNIQUE, -- Added for Sync
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
@@ -191,6 +126,7 @@ class DatabaseService {
         hire_date DATE NOT NULL,
         status TEXT NOT NULL DEFAULT 'Active',
         pin_code TEXT DEFAULT '1234',
+        supabase_id TEXT UNIQUE, -- Added for Sync
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL
@@ -208,6 +144,7 @@ class DatabaseService {
         status TEXT NOT NULL DEFAULT 'Present',
         notes TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, -- Missing in original, added for Sync
         FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
         UNIQUE(employee_id, date)
       )
@@ -232,6 +169,7 @@ class DatabaseService {
         daily_rate REAL DEFAULT 0,
         breakdown TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, -- Added for Sync
         FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
         UNIQUE(employee_id, period_start, period_end)
       )
@@ -247,119 +185,130 @@ class DatabaseService {
     `);
   }
 
-  createUsersTable() {
+
+  createRegistrationTable() {
+    // Consolidated System & Profile Settings
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS users (
+      CREATE TABLE IF NOT EXISTS registration_credentials (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        email TEXT NOT NULL UNIQUE,
-        display_name TEXT NOT NULL,
+        -- Company Information
+        company_name TEXT NOT NULL,
+        company_email TEXT NOT NULL,
+        company_address TEXT,
+        company_contact TEXT,
+        
+        -- Admin Information
+        admin_name TEXT NOT NULL,
+        admin_email TEXT NOT NULL UNIQUE,
+        admin_password_hash TEXT NOT NULL,
+        super_admin_password_hash TEXT NOT NULL,
+        
+        -- Profile Settings (Merged from users table)
         avatar TEXT,
-        phone TEXT,
-        position TEXT,
         bio TEXT,
         theme_preference TEXT DEFAULT 'light',
         language TEXT DEFAULT 'en',
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        
+        -- Registration Status
+        is_registered INTEGER DEFAULT 0,
+        license_key TEXT UNIQUE,
+        registration_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        last_reset_date TIMESTAMP,
+        last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, -- Added for Sync
+        reset_count INTEGER DEFAULT 0
       )
+    `);
+
+    // Create indexes
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_credentials_admin_email ON registration_credentials(admin_email);
+      CREATE INDEX IF NOT EXISTS idx_credentials_is_registered ON registration_credentials(is_registered);
     `);
   }
 
-  // Initialize default admin user - Only one user allowed
-  initializeDefaultUser() {
+  migrateRegistrationTable() {
     try {
-      // First, check if any user exists
-      const checkStmt = this.db.prepare('SELECT COUNT(*) as count FROM users');
-      const result = checkStmt.get();
+      // Check if data already exists
+      const count = this.db.prepare('SELECT COUNT(*) as count FROM registration_credentials').get().count;
 
-      // Only create default user if the table is completely empty
-      if (result.count === 0) {
-        const stmt = this.db.prepare(`
-          INSERT INTO users (email, display_name, position, bio)
-          VALUES (?, ?, ?, ?)
-        `);
+      if (count === 0) {
 
-        stmt.run(
-          'adminpro@company.com',
-          'Admin Pro',
-          'System Administrator',
-          'System administrator with full access to all features.'
-        );
-        console.log('Default admin user created');
+        const userDataPath = require('electron').app.getPath('userData');
+        const oldDbPath = path.join(userDataPath, 'auth-registration.sqlite');
+
+        if (require('fs').existsSync(oldDbPath)) {
+          // Attach old DB
+          this.db.prepare(`ATTACH DATABASE ? AS old_auth`).run(oldDbPath);
+
+          // Copy data
+          this.db.prepare(`
+            INSERT INTO main.registration_credentials (
+              company_name, company_email, company_address, company_contact,
+              admin_name, admin_email, admin_password_hash, super_admin_password_hash,
+              is_registered, license_key, registration_date, last_reset_date,
+              last_updated, reset_count
+            )
+            SELECT 
+              company_name, company_email, company_address, company_contact,
+              admin_name, admin_email, admin_password_hash, super_admin_password_hash,
+              is_registered, license_key, registration_date, last_reset_date,
+              last_updated, reset_count
+            FROM old_auth.registration_credentials
+          `).run();
+
+
+
+          // Detach old DB
+          this.db.prepare('DETACH DATABASE old_auth').run();
+        } else {
+
+        }
       }
     } catch (error) {
-      console.error('Error initializing default user:', error);
+      console.error('Error migrating registration table:', error);
     }
   }
 
-  // Save/Update user profile - Always overwrites the existing single user
+
+
+  // Save/Update user profile - Updates registration_credentials
   saveUserProfile(userData) {
     try {
-      // Get the current user count
-      const countStmt = this.db.prepare('SELECT COUNT(*) as count FROM users');
+      // Check if registration exists
+      const countStmt = this.db.prepare('SELECT COUNT(*) as count FROM registration_credentials WHERE is_registered = 1');
       const countResult = countStmt.get();
 
-      if (countResult.count === 0) {
-        // No user exists, insert new user
-        const insertStmt = this.db.prepare(`
-          INSERT INTO users (
-            email, display_name, avatar, phone, position, 
-            bio, theme_preference, language
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `);
-
-        const info = insertStmt.run(
-          userData.email || 'adminpro@company.com',
-          userData.displayName || 'Admin Pro',
-          userData.avatar || null,
-          userData.phone || null,
-          userData.position || 'System Administrator',
-          userData.bio || 'System administrator with full access to all features.',
-          userData.themePreference || 'light',
-          userData.language || 'en'
-        );
-
-        return { id: info.lastInsertRowid, changes: info.changes };
-      } else {
-        // Always update the first (and only) user
-        // If there are multiple users (shouldn't happen), delete all but the first
-        if (countResult.count > 1) {
-          console.warn('Multiple users found, cleaning up to maintain single user policy');
-          this.cleanupMultipleUsers();
-        }
-
-        // Get the first user's ID
-        const firstUserStmt = this.db.prepare('SELECT id FROM users ORDER BY id LIMIT 1');
-        const firstUser = firstUserStmt.get();
-
-        // Update the single user record
+      if (countResult.count > 0) {
+        // Update existing admin profile
         const updateStmt = this.db.prepare(`
-          UPDATE users SET
-            email = ?,
-            display_name = ?,
-            avatar = ?,
-            phone = ?,
-            position = ?,
-            bio = ?,
-            theme_preference = ?,
-            language = ?,
-            updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?
+          UPDATE registration_credentials 
+          SET 
+            admin_name = COALESCE(@displayName, admin_name),
+            admin_email = COALESCE(@email, admin_email), -- Be careful changing email as it's the key
+            avatar = @avatar,
+            bio = @bio,
+            theme_preference = @themePreference,
+            language = @language,
+            last_updated = CURRENT_TIMESTAMP
+          WHERE is_registered = 1
         `);
 
-        const info = updateStmt.run(
-          userData.email || 'adminpro@company.com',
-          userData.displayName || 'Admin Pro',
-          userData.avatar || null,
-          userData.phone || null,
-          userData.position || 'System Administrator',
-          userData.bio || 'System administrator with full access to all features.',
-          userData.themePreference || 'light',
-          userData.language || 'en',
-          firstUser.id
-        );
+        // We use named parameters for cleaner handling of optional fields
+        const info = updateStmt.run({
+          displayName: userData.displayName,
+          email: userData.email,
+          avatar: userData.avatar || null,
+          bio: userData.bio || null,
+          themePreference: userData.themePreference || 'light',
+          language: userData.language || 'en'
+        });
 
-        return { id: firstUser.id, changes: info.changes };
+
+        return { success: true, changes: info.changes };
+      } else {
+        console.warn('Cannot save profile: No registered admin found.');
+        return { success: false, error: 'System not registered' };
       }
     } catch (error) {
       console.error('Error saving user profile:', error);
@@ -367,108 +316,63 @@ class DatabaseService {
     }
   }
 
-  // Helper method to ensure only one user exists
-  cleanupMultipleUsers() {
-    try {
-      // Get the first user
-      const firstUserStmt = this.db.prepare('SELECT * FROM users ORDER BY id LIMIT 1');
-      const firstUser = firstUserStmt.get();
 
-      if (firstUser) {
-        // Delete all other users
-        const deleteStmt = this.db.prepare('DELETE FROM users WHERE id != ?');
-        deleteStmt.run(firstUser.id);
-        console.log('Cleaned up multiple users, keeping only:', firstUser.email);
+  // Get user profile - Reads from registration_credentials
+  getUserProfile(email) {
+    try {
+      let stmt;
+      if (email) {
+        stmt = this.db.prepare(`
+          SELECT 
+            admin_email as email, 
+            admin_name as display_name, 
+            avatar, 
+            'System Administrator' as position, -- Hardcoded for now as it's Single User
+            bio, 
+            theme_preference, 
+            language 
+          FROM registration_credentials 
+          WHERE admin_email = ? AND is_registered = 1
+        `);
+        return stmt.get(email);
+      } else {
+        // Return the single admin if no email provided
+        stmt = this.db.prepare(`
+          SELECT 
+            admin_email as email, 
+            admin_name as display_name, 
+            avatar, 
+            'System Administrator' as position, 
+            bio, 
+            theme_preference, 
+            language 
+          FROM registration_credentials 
+          WHERE is_registered = 1 
+          ORDER BY id DESC LIMIT 1
+        `);
+        return stmt.get();
       }
-    } catch (error) {
-      console.error('Error cleaning up multiple users:', error);
-    }
-  }
-
-  // Get user profile - Always returns the single user
-  getUserProfile() {
-    try {
-      const stmt = this.db.prepare(`
-        SELECT * FROM users 
-        ORDER BY id LIMIT 1
-      `);
-      return stmt.get();
     } catch (error) {
       console.error('Error getting user profile:', error);
       return null;
     }
   }
 
-  // Update user avatar for the single user
-  updateUserAvatar(avatarData) {
-    try {
-      const user = this.getUserProfile();
-      if (!user) {
-        throw new Error('No user found to update avatar');
-      }
-
-      const stmt = this.db.prepare(`
-        UPDATE users 
-        SET avatar = ?, updated_at = CURRENT_TIMESTAMP 
-        WHERE id = ?
-      `);
-
-      const info = stmt.run(avatarData, user.id);
-      return { changes: info.changes };
-    } catch (error) {
-      console.error('Error updating user avatar:', error);
-      throw error;
-    }
-  }
-
-  // Get all user settings (including preferences)
-  getUserSettings() {
+  // Get user settings (theme, language) - Reads from registration_credentials
+  getUserSettings(email) {
     try {
       const stmt = this.db.prepare(`
-        SELECT 
-          email,
-          display_name as displayName,
-          avatar,
-          phone,
-          position,
-          bio,
-          theme_preference as themePreference,
-          language,
-          created_at as createdAt,
-          updated_at as updatedAt
-        FROM users 
-        ORDER BY id LIMIT 1
+        SELECT theme_preference, language 
+        FROM registration_credentials 
+        WHERE admin_email = ? AND is_registered = 1
       `);
-
-      return stmt.get();
+      return stmt.get(email);
     } catch (error) {
       console.error('Error getting user settings:', error);
       return null;
     }
   }
 
-  // Delete all users (for reset functionality)
-  deleteAllUsers() {
-    try {
-      const stmt = this.db.prepare('DELETE FROM users');
-      const info = stmt.run();
-      return { changes: info.changes };
-    } catch (error) {
-      console.error('Error deleting all users:', error);
-      throw error;
-    }
-  }
-
-  // Get the current user count (should always be 0 or 1)
-  getUserCount() {
-    try {
-      const stmt = this.db.prepare('SELECT COUNT(*) as count FROM users');
-      return stmt.get().count;
-    } catch (error) {
-      console.error('Error getting user count:', error);
-      return 0;
-    }
-  }
 
   // Employee methods (unchanged from your original code)
   getAllEmployees() {
@@ -496,7 +400,7 @@ class DatabaseService {
   }
 
   async createEmployee(employee) {
-    console.log('DatabaseService: Creating employee...', employee);
+
 
     // 1. Generate UUID locally (Supabase ID)
     let supabaseUserId = crypto.randomUUID();
@@ -523,7 +427,7 @@ class DatabaseService {
           });
 
         if (dbError) console.error('Supabase DB Insert Error:', dbError);
-        else console.log('Supabase DB Record created');
+
 
       } catch (dbErr) {
         console.error('Supabase DB Logic Error:', dbErr);
@@ -600,18 +504,18 @@ class DatabaseService {
       const hasPinCode = tableInfo.some(column => column.name === 'pin_code');
 
       if (!hasPinCode) {
-        console.log('Migrating employees table: adding pin_code column...');
+
         this.db.exec("ALTER TABLE employees ADD COLUMN pin_code TEXT DEFAULT '1234'");
-        console.log('Migration successful: pin_code column added.');
+
       }
 
       const hasSupabaseId = tableInfo.some(column => column.name === 'supabase_id');
       if (!hasSupabaseId) {
-        console.log('Migrating employees table: adding supabase_id column...');
+
         // SQLite limitation: Cannot add UNIQUE constraint in ALTER TABLE ADD COLUMN
         this.db.exec("ALTER TABLE employees ADD COLUMN supabase_id TEXT");
         this.db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_supabase_id ON employees(supabase_id)");
-        console.log('Migration successful: supabase_id column added.');
+
       }
 
     } catch (error) {
@@ -1136,83 +1040,34 @@ class DatabaseService {
       // Add cutoff_type if it doesn't exist
       if (!columnNames.includes('cutoff_type')) {
         this.db.exec(`ALTER TABLE payroll ADD COLUMN cutoff_type TEXT DEFAULT 'Full Month'`);
-        console.log('Added cutoff_type column to payroll table');
+
       }
 
       // Add working_days if it doesn't exist
       if (!columnNames.includes('working_days')) {
         this.db.exec(`ALTER TABLE payroll ADD COLUMN working_days INTEGER DEFAULT 24`);
-        console.log('Added working_days column to payroll table');
+
       }
 
       // Add days_present if it doesn't exist
       if (!columnNames.includes('days_present')) {
         this.db.exec(`ALTER TABLE payroll ADD COLUMN days_present INTEGER DEFAULT 24`);
-        console.log('Added days_present column to payroll table');
+
       }
 
       // Add daily_rate if it doesn't exist
       if (!columnNames.includes('daily_rate')) {
         this.db.exec(`ALTER TABLE payroll ADD COLUMN daily_rate REAL DEFAULT 0`);
-        console.log('Added daily_rate column to payroll table');
+
       }
 
       // Add breakdown if it doesn't exist
       if (!columnNames.includes('breakdown')) {
         this.db.exec(`ALTER TABLE payroll ADD COLUMN breakdown TEXT`);
-        console.log('Added breakdown column to payroll table');
+
       }
 
-      // Check and migrate users table
-      const usersColumns = this.db.prepare(`
-        PRAGMA table_info(users)
-      `).all();
 
-      const usersColumnNames = usersColumns.map(col => col.name);
-
-      // Add display_name if it doesn't exist
-      if (!usersColumnNames.includes('display_name')) {
-        this.db.exec(`ALTER TABLE users ADD COLUMN display_name TEXT DEFAULT ''`);
-        console.log('Added display_name column to users table');
-      }
-
-      // Add avatar if it doesn't exist
-      if (!usersColumnNames.includes('avatar')) {
-        this.db.exec(`ALTER TABLE users ADD COLUMN avatar TEXT`);
-        console.log('Added avatar column to users table');
-      }
-
-      // Add phone if it doesn't exist
-      if (!usersColumnNames.includes('phone')) {
-        this.db.exec(`ALTER TABLE users ADD COLUMN phone TEXT`);
-        console.log('Added phone column to users table');
-      }
-
-      // Add position if it doesn't exist
-      if (!usersColumnNames.includes('position')) {
-        this.db.exec(`ALTER TABLE users ADD COLUMN position TEXT`);
-        console.log('Added position column to users table');
-      }
-
-      // Add bio if it doesn't exist
-      if (!usersColumnNames.includes('bio')) {
-        this.db.exec(`ALTER TABLE users ADD COLUMN bio TEXT`);
-        console.log('Added bio column to users table');
-      }
-
-      // Add theme_preference if it doesn't exist
-      if (!usersColumnNames.includes('theme_preference')) {
-        this.db.exec(`ALTER TABLE users ADD COLUMN theme_preference TEXT DEFAULT 'light'`);
-        console.log('Added theme_preference column to users table');
-      }
-
-      // Add language if it doesn't exist
-      if (!usersColumnNames.includes('language')) {
-        this.db.exec(`ALTER TABLE users ADD COLUMN language TEXT DEFAULT 'en'`);
-        console.log('Added language column to users table');
-      }
-
-      console.log('Database migration completed successfully');
     } catch (error) {
       console.error('Error during database migration:', error);
     }
@@ -1245,6 +1100,74 @@ class DatabaseService {
     if (this.db) {
       this.db.close();
     }
+  }
+  // Dashboard methods
+  getRecentActivities(limit = 10) {
+    try {
+      const sql = `
+        SELECT * FROM (
+          -- Check-ins
+          SELECT 
+            'attendance' as type,
+            'checked in' as action,
+            (date || ' ' || check_in) as timestamp,
+            e.first_name,
+            e.last_name
+          FROM attendance a
+          JOIN employees e ON a.employee_id = e.id
+          WHERE a.check_in IS NOT NULL AND a.check_in != ''
+          
+          UNION ALL
+          
+          -- Check-outs
+          SELECT 
+            'attendance' as type,
+            'checked out' as action,
+            (date || ' ' || check_out) as timestamp,
+            e.first_name,
+            e.last_name
+          FROM attendance a
+          JOIN employees e ON a.employee_id = e.id
+          WHERE a.check_out IS NOT NULL AND a.check_out != ''
+          
+          UNION ALL
+          
+          -- New Employees
+          SELECT 
+            'employee' as type,
+            'joined the team' as action,
+            created_at as timestamp,
+            first_name,
+            last_name
+          FROM employees
+        )
+        ORDER BY timestamp DESC
+        LIMIT ?
+      `;
+
+      return this.db.prepare(sql).all(limit);
+    } catch (error) {
+      console.error('Error getting recent activities:', error);
+      return [];
+    }
+  }
+
+  createTriggers() {
+    const tables = ['departments', 'employees', 'attendance', 'payroll', 'registration_credentials'];
+
+    tables.forEach(table => {
+      try {
+        this.db.exec(`
+                CREATE TRIGGER IF NOT EXISTS update_${table}_updated_at 
+                AFTER UPDATE ON ${table}
+                BEGIN
+                    UPDATE ${table} SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+                END;
+            `);
+      } catch (e) {
+        console.error(`Error creating trigger for ${table}:`, e);
+      }
+    });
   }
 }
 

@@ -69,10 +69,10 @@ function App() {
 
   const handleRegistration = async (registrationData) => {
     try {
-      console.log('Registration data sent to backend:', registrationData);
+
       const result = await window.electronAPI.registerSystem(registrationData);
 
-      console.log('Registration API response:', result);
+
 
       if (result.success) {
         // Return the success result with the super admin password
@@ -163,7 +163,7 @@ function App() {
       <div className="min-h-screen flex items-center justify-center bg-gray-900">
         <div className="flex flex-col items-center">
           <div className="h-12 w-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-          <p className="text-gray-400">Loading...</p>
+          <p className="text-gray-400">Checking system registration...</p>
         </div>
       </div>
     );

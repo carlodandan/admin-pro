@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, CheckCircle, XCircle, Users, Search, Filter, RefreshCw, Loader2, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Calendar, Clock, CheckCircle, XCircle, Users, Search, Filter, RefreshCw, Loader2, AlertCircle, ChevronLeft, ChevronRight, Lock } from 'lucide-react';
 import AttendanceChart from '../components/Attendance/AttendanceChart';
 import MonthlyAttendanceReport from '../components/Attendance/MonthlyAttendanceReport';
+import { useUser } from '../contexts/UserContext';
 
 // Helper to get current time in Asia/Manila
 const getManilaTime = () => {
@@ -36,6 +37,12 @@ const Attendance = () => {
   const [departments, setDepartments] = useState([]);
   const [isRecording, setIsRecording] = useState(false);
 
+  const { user } = useUser();
+  const [showKioskModal, setShowKioskModal] = useState(false);
+  const [adminPassword, setAdminPassword] = useState('');
+  const [kioskError, setKioskError] = useState('');
+  const [isVerifying, setIsVerifying] = useState(false);
+
   // Load initial data
   useEffect(() => {
     loadAttendanceData(selectedDate);
@@ -49,8 +56,6 @@ const Attendance = () => {
       // Use the provided date or selectedDate
       const targetDate = date || selectedDate;
 
-      // You need a new API method to get attendance for a specific date
-      // Let's create one by querying the database
       const attendanceQuery = `
         SELECT * FROM attendance 
         WHERE date = ? 
@@ -66,6 +71,35 @@ const Attendance = () => {
       setLoading(false);
     }
   };
+
+  const handleLaunchKiosk = async (e) => {
+    e.preventDefault();
+    setIsVerifying(true);
+    setKioskError('');
+
+    try {
+      if (!adminPassword) {
+        throw new Error('Password is required');
+      }
+
+      // Verify admin password
+      const result = await window.electronAPI.loginUser(user.email, adminPassword);
+
+      if (result.success) {
+        // Success - Launch Kiosk
+        window.open('#/kiosk', '_self');
+      } else {
+        throw new Error(result.error || 'Invalid password');
+      }
+    } catch (error) {
+      console.error('Kiosk launch error:', error);
+      setKioskError(error.message);
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  const isToday = selectedDate === getManilaDate();
 
   const loadEmployees = async () => {
     try {
@@ -105,7 +139,7 @@ const Attendance = () => {
 
       const employee = employees.find(emp => emp.id === employeeId);
       if (employee) {
-        console.log(`Successfully timed in ${employee.first_name} at ${currentTime}`);
+
       }
     } catch (error) {
       console.error('Error recording time in:', error);
@@ -133,7 +167,7 @@ const Attendance = () => {
 
       const employee = employees.find(emp => emp.id === employeeId);
       if (employee) {
-        console.log(`Successfully timed out ${employee.first_name} at ${currentTime}`);
+
       }
     } catch (error) {
       console.error('Error recording time out:', error);
@@ -245,10 +279,78 @@ const Attendance = () => {
     setSelectedDate(currentDate.toISOString().split('T')[0]);
   };
 
-  const isToday = selectedDate === getManilaDate();
+
 
   return (
     <div className="space-y-6">
+      {/* Kiosk Password Modal */}
+      {showKioskModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-3 bg-blue-100 rounded-full text-blue-600">
+                <Lock size={24} />
+              </div>
+              <div>
+                <h3 className="text-xl font-bold text-gray-900">Admin Access Required</h3>
+                <p className="text-sm text-gray-500">Enter your password to launch Kiosk Mode</p>
+              </div>
+            </div>
+
+            <form onSubmit={handleLaunchKiosk}>
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Admin Password
+                </label>
+                <input
+                  type="password"
+                  value={adminPassword}
+                  onChange={(e) => setAdminPassword(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+                  placeholder="Enter password..."
+                  autoFocus
+                />
+                {kioskError && (
+                  <p className="mt-2 text-sm text-red-600 flex items-center gap-1">
+                    <AlertCircle size={14} />
+                    {kioskError}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex gap-3 justify-end mt-6">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowKioskModal(false);
+                    setAdminPassword('');
+                    setKioskError('');
+                  }}
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isVerifying}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
+                >
+                  {isVerifying ? (
+                    <>
+                      <Loader2 size={18} className="animate-spin" />
+                      Verifying...
+                    </>
+                  ) : (
+                    <>
+                      Launch Kiosk
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
       {/* Header */}
       <div className="flex justify-between items-center">
         <div>
@@ -300,7 +402,7 @@ const Attendance = () => {
           </button>
 
           <button
-            onClick={() => window.open('#/kiosk', '_self')}
+            onClick={() => setShowKioskModal(true)}
             className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors shadow-sm ml-2"
             title="Launch Kiosk Mode"
           >

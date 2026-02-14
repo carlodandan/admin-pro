@@ -14,7 +14,7 @@ class DashboardService {
       const totalEmployees = employees.length;
       const activeEmployees = employees.filter(e => e.status === 'Active').length;
       const onLeaveEmployees = employees.filter(e => e.status === 'On Leave').length;
-      
+
       // Calculate average salary
       const totalSalary = employees.reduce((sum, emp) => sum + (emp.salary || 0), 0);
       const avgSalary = employees.length > 0 ? totalSalary / employees.length : 0;
@@ -66,19 +66,19 @@ class DashboardService {
       // This is a simplified version - you should create a proper attendance query
       const today = new Date();
       const weekDays = [];
-      
+
       // Generate last 7 days
       for (let i = 6; i >= 0; i--) {
         const date = new Date(today);
         date.setDate(today.getDate() - i);
         const dateStr = date.toISOString().split('T')[0];
-        
+
         // In a real app, you would query the database for each day
         // For now, simulate data
         const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
         const present = Math.floor(Math.random() * 200) + 50;
         const absent = Math.floor(Math.random() * 20) + 1;
-        
+
         weekDays.push({
           day: dayName,
           date: dateStr,
@@ -87,7 +87,7 @@ class DashboardService {
           total: present + absent
         });
       }
-      
+
       return weekDays;
     } catch (error) {
       console.error('Error fetching weekly attendance:', error);
@@ -101,10 +101,10 @@ class DashboardService {
       // In a real app, you would query the payroll table
       // For now, simulate with employee data
       const employees = await DatabaseService.getAllEmployees();
-      
+
       const currentMonth = new Date().getMonth();
       const currentYear = new Date().getFullYear();
-      
+
       // Filter employees hired this month (simulated payroll)
       const payrollEmployees = employees.slice(0, 5).map((emp, index) => ({
         id: emp.id,
@@ -117,7 +117,7 @@ class DashboardService {
         payDate: `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-28`
       }));
 
-      const totalPayroll = payrollEmployees.reduce((sum, emp) => 
+      const totalPayroll = payrollEmployees.reduce((sum, emp) =>
         sum + emp.salary + emp.bonus - emp.deductions, 0
       );
 
@@ -140,42 +140,39 @@ class DashboardService {
     return payrollSummary.total * 3;
   }
 
-  // Get recent activities (simulated)
-  static getRecentActivities(employees) {
-    const actions = [
-      'added as new employee',
-      'updated profile',
-      'approved leave request',
-      'processed payroll',
-      'updated department',
-      'created report'
-    ];
+  // Get recent activities (real data from DB)
+  static async getRecentActivities() {
+    if (!window.electronAPI) return [];
 
-    if (!employees || employees.length === 0) {
+    try {
+      const activities = await window.electronAPI.getRecentActivities(10);
+
+      return activities.map(activity => {
+        // Format relative time (e.g., "5 mins ago")
+        const eventTime = new Date(activity.timestamp);
+        const now = new Date();
+        const diffMs = now - eventTime;
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMins / 60);
+        const diffDays = Math.floor(diffHours / 24);
+
+        let timeStr = 'Just now';
+        if (diffDays > 0) timeStr = `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+        else if (diffHours > 0) timeStr = `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+        else if (diffMins > 1) timeStr = `${diffMins} mins ago`;
+        else if (diffMins === 1) timeStr = '1 min ago';
+
+        return {
+          user: `${activity.first_name} ${activity.last_name}`,
+          action: activity.action,
+          time: timeStr,
+          initials: `${activity.first_name?.[0] || ''}${activity.last_name?.[0] || ''}`
+        };
+      });
+    } catch (error) {
+      console.error('Error converting recent activities:', error);
       return [];
     }
-
-    const users = employees.slice(0, 5).map(emp => ({
-      name: `${emp.first_name} ${emp.last_name}`,
-      initials: `${emp.first_name?.[0] || ''}${emp.last_name?.[0] || ''}`
-    }));
-
-    const activities = [];
-    const now = new Date();
-
-    for (let i = 0; i < 3; i++) {
-      const user = users[i % users.length];
-      const timeAgo = i === 0 ? '2 min ago' : i === 1 ? '15 min ago' : '1 hour ago';
-      
-      activities.push({
-        user: user.name, // This is now safe because we checked if users.length > 0
-        action: actions[i % actions.length],
-        time: timeAgo,
-        initials: user.initials
-      });
-    }
-
-    return activities;
   }
 }
 

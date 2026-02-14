@@ -33,12 +33,12 @@ const Dashboard = () => {
   };
 
   const handleGenerateReport = () => {
-    console.log('Generating report...');
+
     // Implement report generation
   };
 
   const handleViewAnalytics = () => {
-    console.log('Viewing analytics...');
+
     // Implement analytics view
   };
 
@@ -59,7 +59,7 @@ const Dashboard = () => {
         <div className="text-center">
           <div className="text-red-500 mb-4">⚠️</div>
           <p className="text-gray-600 mb-4">{error}</p>
-          <button 
+          <button
             onClick={loadDashboardData}
             className="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600"
           >
@@ -69,7 +69,7 @@ const Dashboard = () => {
       </div>
     );
   }
-  
+
   // Define fallback value for totalEmployees based on data, defaulting to 1 for division
   const totalEmployees = stats?.totalEmployees || 1;
 
@@ -80,22 +80,22 @@ const Dashboard = () => {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <h1 className="text-l md:text-xl font-bold text-gray-900">
-              Welcome back, Administrator 
+              Welcome back, Administrator
             </h1>
             <p className="text-sm text-gray-600 mt-2">
-              Here's what's happening with your company today. 
+              Here's what's happening with your company today.
               You have {stats?.payrollSummary?.pending || 0} pending payroll items to review.
             </p>
           </div>
           <div className="flex gap-3">
-            <button 
+            <button
               onClick={handleGenerateReport}
               className="flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold hover:bg-blue-700 transition-colors"
             >
               <Download size={18} />
               Generate Report
             </button>
-            <button 
+            <button
               onClick={handleViewAnalytics}
               className="flex items-center gap-2 border border-gray-300 text-gray-700 px-6 py-3 rounded-xl font-semibold hover:bg-gray-50 transition-colors"
             >
@@ -125,18 +125,18 @@ const Dashboard = () => {
             <h3 className="font-bold text-lg mb-4">Quick Stats</h3>
             <div className="space-y-4">
               {[
-                { 
-                  label: 'Total Departments', 
+                {
+                  label: 'Total Departments',
                   value: stats?.totalDepartments || 0,
                   color: 'text-gray-900'
                 },
-                { 
-                  label: 'Avg. Attendance', 
+                {
+                  label: 'Avg. Attendance',
                   value: `${stats?.attendancePercentage?.toFixed(1) || 0}%`,
                   color: (stats?.attendancePercentage || 0) >= 90 ? 'text-green-600' : 'text-yellow-600'
                 },
-                { 
-                  label: 'Monthly Revenue', 
+                {
+                  label: 'Monthly Revenue',
                   value: new Intl.NumberFormat('en-US', {
                     style: 'currency',
                     currency: 'USD',
@@ -208,11 +208,11 @@ const Dashboard = () => {
                             <span className="text-sm font-bold">{deptCount} {deptCount === 1 ? 'employee' : 'employees'}</span>
                           </div>
                           <div className="w-full bg-gray-200 rounded-full h-2">
-                            <div 
+                            <div
                               className="bg-blue-500 h-2 rounded-full"
-                              style={{ 
+                              style={{
                                 // Ensure percentage doesn't exceed 100%
-                                width: `${Math.min(100, percentage)}%` 
+                                width: `${Math.min(100, percentage)}%`
                               }}
                             ></div>
                           </div>
