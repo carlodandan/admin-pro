@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react'; 
-import { 
+import React, { useState, useEffect } from 'react';
+import {
   User, Camera, Save, Lock, Bell, Palette, Database, Shield,
   Moon, Sun, Globe, CreditCard, FileText, Download, Key,
   Mail, Phone, Building, MapPin, Calendar, AlertCircle,
@@ -70,7 +70,7 @@ const Settings = () => {
       if (regInfo && regInfo.success && regInfo.data) {
         const companyData = regInfo.data;
         setCompanyInfo(companyData);
-        
+
         // Update company state with data from auth database
         setCompany(prev => ({
           ...prev,
@@ -79,6 +79,15 @@ const Settings = () => {
           phone: companyData.company_phone || '',
           address: companyData.company_address || ''
         }));
+
+        // Always use admin_name and admin_email from registration_credentials
+        if (companyData.admin_name) {
+          setProfile(prev => ({ ...prev, displayName: companyData.admin_name }));
+        }
+        if (companyData.admin_email) {
+          setProfile(prev => ({ ...prev, email: companyData.admin_email }));
+          setCurrentUserEmail(companyData.admin_email);
+        }
       }
     } catch (error) {
       console.error('Error loading company info:', error);
@@ -97,7 +106,7 @@ const Settings = () => {
           avatar: userData.avatar || '',
           bio: userData.bio || 'System administrator with full access to all features.'
         });
-        
+
         // Also update appearance if saved
         if (userData.themePreference || userData.language) {
           setAppearance(prev => ({
@@ -150,12 +159,12 @@ const Settings = () => {
       // This would require a new IPC handler to update company info
       // For now, we'll just save to local storage
       localStorage.setItem('companyInfo', JSON.stringify(company));
-      
+
       setSaveStatus({
         type: 'success',
         message: 'Company information saved!'
       });
-      
+
       setTimeout(() => setSaveStatus(null), 3000);
     } catch (error) {
       console.error('Error saving company info:', error);
@@ -183,24 +192,24 @@ const Settings = () => {
     const reader = new FileReader();
     reader.onloadend = async () => {
       const base64Data = reader.result;
-      
+
       try {
         // Save to database
         await window.electronAPI.updateUserAvatar(currentUserEmail, base64Data);
-        
+
         // Update local state
         handleProfileChange('avatar', base64Data);
-        
+
         // Broadcast avatar change to other components (like header)
-        window.dispatchEvent(new CustomEvent('avatarUpdated', { 
-          detail: { avatar: base64Data } 
+        window.dispatchEvent(new CustomEvent('avatarUpdated', {
+          detail: { avatar: base64Data }
         }));
-        
+
         setSaveStatus({
           type: 'success',
           message: 'Profile picture updated successfully!'
         });
-        
+
         setTimeout(() => setSaveStatus(null), 3000);
       } catch (error) {
         console.error('Error saving avatar:', error);
@@ -217,7 +226,7 @@ const Settings = () => {
   const saveSettings = async () => {
     setLoading(true);
     setSaveStatus(null);
-    
+
     try {
       // Prepare user data for database - REMOVED department and hireDate
       const userData = {
@@ -230,23 +239,23 @@ const Settings = () => {
         themePreference: appearance.theme,
         language: appearance.language
       };
-      
+
       // Save to database - using the NEW email
       await window.electronAPI.saveUserProfile(userData);
-      
+
       // Update currentUserEmail state with the new email
       setCurrentUserEmail(profile.email);
-      
+
       // Update UserContext with the new email
-      window.dispatchEvent(new CustomEvent('profileUpdated', { 
-        detail: { 
+      window.dispatchEvent(new CustomEvent('profileUpdated', {
+        detail: {
           displayName: profile.displayName,
           avatar: profile.avatar,
           email: profile.email,
           position: profile.position
-        } 
+        }
       }));
-        
+
     } catch (error) {
       console.error('Error saving settings:', error);
       setSaveStatus({
@@ -304,11 +313,10 @@ const Settings = () => {
                   <button
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id)}
-                    className={`flex items-center gap-3 w-full px-4 py-3 rounded-lg text-left transition-colors ${
-                      activeTab === tab.id
+                    className={`flex items-center gap-3 w-full px-4 py-3 rounded-lg text-left transition-colors ${activeTab === tab.id
                         ? 'bg-blue-50 text-blue-600 border border-blue-100'
                         : 'text-gray-700 hover:bg-gray-50'
-                    }`}
+                      }`}
                   >
                     <div className={`${activeTab === tab.id ? 'text-blue-500' : 'text-gray-400'}`}>
                       {tab.icon}
@@ -355,32 +363,32 @@ const Settings = () => {
                   {/* Avatar Section */}
                   <div className="flex items-center gap-6">
                     <div className="relative">
-                        <div className="w-24 h-24 rounded-full bg-gray-100 border-4 border-white shadow-lg overflow-hidden">
+                      <div className="w-24 h-24 rounded-full bg-gray-100 border-4 border-white shadow-lg overflow-hidden">
                         {profile.avatar ? (
-                            <img 
-                            src={profile.avatar} 
-                            alt="Profile" 
+                          <img
+                            src={profile.avatar}
+                            alt="Profile"
                             className="w-full h-full object-cover"
                             onError={(e) => {
-                                // Fallback if image fails to load
-                                e.target.style.display = 'none';
+                              // Fallback if image fails to load
+                              e.target.style.display = 'none';
                             }}
-                            />
+                          />
                         ) : (
-                            <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-blue-500 to-purple-600">
+                          <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-blue-500 to-purple-600">
                             <User size={40} className="text-white" />
-                            </div>
+                          </div>
                         )}
-                        </div>
-                        <label className="absolute bottom-0 right-0 bg-blue-600 text-white p-2 rounded-full cursor-pointer hover:bg-blue-700 transition-colors">
+                      </div>
+                      <label className="absolute bottom-0 right-0 bg-blue-600 text-white p-2 rounded-full cursor-pointer hover:bg-blue-700 transition-colors">
                         <Camera size={16} />
                         <input
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            onChange={handleAvatarUpload}
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={handleAvatarUpload}
                         />
-                        </label>
+                      </label>
                     </div>
                     <div>
                       <h3 className="font-medium text-gray-900">{profile.displayName}</h3>

@@ -13,6 +13,8 @@ import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import { UserProvider } from './contexts/UserContext';
 import AttendanceKiosk from './pages/AttendanceKiosk';
 
+const SESSION_DURATION_MS = 60 * 60 * 1000; // 1 hour
+
 // Protected Route Component
 const ProtectedRoute = ({ children, isAuthenticated }) => {
   if (!isAuthenticated) {
@@ -51,12 +53,19 @@ function App() {
         // If registered, check if we have a stored token
         const token = localStorage.getItem('authToken');
         if (token) {
-          // In a real app, you would validate the token here
-          // For now, we'll just check if we have user info in localStorage
-          const savedUser = localStorage.getItem('userInfo');
-          if (savedUser) {
-            setUserInfo(JSON.parse(savedUser));
-            setIsAuthenticated(true);
+          // Check if session has expired
+          const loginTime = parseInt(localStorage.getItem('loginTimestamp'), 10);
+          if (loginTime && (Date.now() - loginTime) > SESSION_DURATION_MS) {
+            // Session expired — force logout
+            localStorage.removeItem('authToken');
+            localStorage.removeItem('userInfo');
+            localStorage.removeItem('loginTimestamp');
+          } else {
+            const savedUser = localStorage.getItem('userInfo');
+            if (savedUser) {
+              setUserInfo(JSON.parse(savedUser));
+              setIsAuthenticated(true);
+            }
           }
         }
       }
@@ -107,6 +116,7 @@ function App() {
         };
 
         localStorage.setItem('userInfo', JSON.stringify(userData));
+        localStorage.setItem('loginTimestamp', Date.now().toString());
         setUserInfo(userData);
         setIsAuthenticated(true);
 
@@ -154,9 +164,25 @@ function App() {
   const handleLogout = () => {
     localStorage.removeItem('authToken');
     localStorage.removeItem('userInfo');
+    localStorage.removeItem('loginTimestamp');
     setUserInfo(null);
     setIsAuthenticated(false);
   };
+
+  // Session timeout — check every minute if 1 hour has elapsed
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const checkSession = () => {
+      const loginTime = parseInt(localStorage.getItem('loginTimestamp'), 10);
+      if (!loginTime || (Date.now() - loginTime) > SESSION_DURATION_MS) {
+        handleLogout();
+      }
+    };
+
+    const intervalId = setInterval(checkSession, 60 * 1000); // check every 60s
+    return () => clearInterval(intervalId);
+  }, [isAuthenticated]);
 
   if (isLoading) {
     return (
