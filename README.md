@@ -87,7 +87,7 @@ The application uses a `.env` file for configuration.
 | Variable | Description | Required |
 |----------|-------------|----------|
 | `SUPABASE_URL` | URL of your Supabase project | Yes |
-| `SUPABASE_KEY` | Service Role Key for Supabase | Yes |
+| `SUPABASE_ANON_KEY` | Supabase Publishable Key for Supabase | Yes |
 
 ## 🤝 Contributing
 
