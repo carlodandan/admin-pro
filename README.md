@@ -88,7 +88,9 @@ The application uses a `.env` file for configuration.
 | Variable | Description | Required |
 |----------|-------------|----------|
 | `VITE_SUPABASE_URL` | URL of your Supabase project | Yes |
-| `VITE_SUPABASE_KEY` | Service Role Key for Supabase | Yes |
+| `VITE_SUPABASE_ANONKEY` | Supabase Publishable Key | Yes |
+
+For more information on how to get these values, please refer to the [SUPABASE_SETUP.md](https://github.com/carlodandan/admin-pro/blob/main/SUPABASE_SETUP.md).
 
 ## 🤝 Contributing
 
@@ -100,4 +102,4 @@ The application uses a `.env` file for configuration.
 
 ## 📄 License
 
-Distributed under the MIT License. See `LICENSE` for more information.
+Distributed under the MIT License. See [LICENSE](https://github.com/carlodandan/admin-pro/blob/main/LICENSE) for more information.
