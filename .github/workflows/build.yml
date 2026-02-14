@@ -1,0 +1,73 @@
+name: Build Admin Pro
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-2025
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    permissions:
+      contents: write
+
+    steps:
+      # 1. Check out the repository code
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # 2. Setup PNPM environment
+      - uses: pnpm/action-setup@v4
+        with:
+          # Keep aligned with local environment
+          version: 10.28.2
+
+      # 3. Setup Node.js environment
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          # Keep aligned with local environment
+          node-version: "24.7.0"
+          cache: pnpm
+
+      # 4. Install dependencies cleanly
+      - name: Install Dependencies
+        run: pnpm install
+
+      # 5. Build the application (electron-forge publish)
+      - name: Build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: pnpm run make
+
+      # 6. Set Other Variables
+      - name: Set Other Variables
+        shell: bash
+        run: |
+          echo "BUILD_DATE=$(date +%Y%m%d)" >> $GITHUB_ENV
+          echo "COMMIT_ID=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+          echo "APP_VERSION=$(jq -r '.version' package.json)" >> $GITHUB_ENV
+          echo "VITE_VER=$(jq -r '.devDependencies.vite' package.json)" >> $GITHUB_ENV
+          echo "ELECTRON_VER=$(jq -r '.devDependencies.electron' package.json)" >> $GITHUB_ENV
+          echo "REACT_VER=$(jq -r '.devDependencies.react' package.json)" >> $GITHUB_ENV
+          echo "TAILWIND_VER=$(jq -r '.devDependencies.tailwindcss' package.json)" >> $GITHUB_ENV
+
+      # 7. Upload the Build
+      - name: Upload to Release (Admin Pro)
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            out/make/squirrel.windows/x64/*
+        name: Admin Pro - Windows 64-bit || ${{ env.BUILD_DATE }}
+        tag_name: ap-${{ env.COMMIT_ID }}
+        body: |
+          Build: Windows 64-bit (using Squirrel.Windows)
+          Version: ${{ env.APP_VERSION }}
+          Commit: Most recent [commit](https://github.com/carlodandan/admin-pro/commit/${{ env.COMMIT_ID }}) during building process.
+          
+          Major Dependencies:
+          - Vite: ${{ env.VITE_VER }}
+          - Electron: ${{ env.ELECTRON_VER }}
+          - React: ${{ env.REACT_VER }}
+          - Tailwind CSS: ${{ env.TAILWIND_VER }}
