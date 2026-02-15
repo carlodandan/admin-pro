@@ -50,8 +50,9 @@ jobs:
           echo "APP_VERSION=$(jq -r '.version' package.json)" >> $GITHUB_ENV
           echo "VITE_VER=$(jq -r '.devDependencies.vite' package.json)" >> $GITHUB_ENV
           echo "ELECTRON_VER=$(jq -r '.devDependencies.electron' package.json)" >> $GITHUB_ENV
-          echo "REACT_VER=$(jq -r '.Dependencies.react' package.json)" >> $GITHUB_ENV
-          echo "TAILWIND_VER=$(jq -r '.Dependencies.tailwindcss' package.json)" >> $GITHUB_ENV
+          echo "BETTER_SQLITE3=$(jq -r '.dependencies.better-sqlite3' package.json)" >> $GITHUB_ENV
+          echo "REACT_VER=$(jq -r '.dependencies.react' package.json)" >> $GITHUB_ENV
+          echo "TAILWIND_VER=$(jq -r '.dependencies.tailwindcss' package.json)" >> $GITHUB_ENV
 
       # 7. Upload the Build
       - name: Upload to Release (Admin Pro)
@@ -69,5 +70,6 @@ jobs:
             Major Dependencies:
             - Vite: ${{ env.VITE_VER }}
             - Electron: ${{ env.ELECTRON_VER }}
+            - SQLite3: ${{ env.BETTER_SQLITE3_VER }}
             - React: ${{ env.REACT_VER }}
             - Tailwind CSS: ${{ env.TAILWIND_VER }}
