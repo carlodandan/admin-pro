@@ -3,6 +3,12 @@
 //! Transcribed from `DatabaseService.createTables()`,
 //! `createRegistrationTable()` and `createTriggers()` so that an existing
 //! `company-admin.sqlite` written by the Electron build opens unchanged.
+//!
+//! Two deliberate departures from that transcription: no password hash column
+//! survives here, because GoTrue owns credentials now and nothing local ever
+//! verifies one; and `employees` carries `email_bidx` / `company_id_bidx`,
+//! which hold the uniqueness the encrypted columns can no longer enforce.
+//! `db::migrations` brings existing installs to this shape.
 
 use crate::error::Result;
 use rusqlite::Connection;
@@ -21,9 +27,11 @@ const TABLES: &[&str] = &[
     r#"CREATE TABLE IF NOT EXISTS employees (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         company_id TEXT UNIQUE,
+        company_id_bidx TEXT,
         first_name TEXT NOT NULL,
         last_name TEXT NOT NULL,
         email TEXT NOT NULL UNIQUE,
+        email_bidx TEXT,
         phone TEXT,
         position TEXT NOT NULL,
         department_id INTEGER,
@@ -70,6 +78,14 @@ const TABLES: &[&str] = &[
         FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
         UNIQUE(employee_id, cutoff_start, cutoff_end)
     )"#,
+    // Bookkeeping the app writes about itself. Its only entry today is the
+    // `seeded` marker, written inside the seed transaction so a crash midway
+    // leaves nothing marked done and the next start retries from scratch.
+    r#"CREATE TABLE IF NOT EXISTS app_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )"#,
 ];
 
 /// `registration_credentials` is created separately, exactly as
@@ -82,8 +98,6 @@ const REGISTRATION_TABLE: &str = r#"CREATE TABLE IF NOT EXISTS registration_cred
     company_contact TEXT,
     admin_name TEXT NOT NULL,
     admin_email TEXT NOT NULL UNIQUE,
-    admin_password_hash TEXT NOT NULL,
-    super_admin_password_hash TEXT NOT NULL,
     avatar TEXT,
     bio TEXT,
     theme_preference TEXT DEFAULT 'dark',
@@ -103,6 +117,12 @@ const INDEXES: &[&str] = &[
     "CREATE INDEX IF NOT EXISTS idx_attendance_date ON attendance(date)",
     "CREATE INDEX IF NOT EXISTS idx_attendance_employee_date ON attendance(employee_id, date)",
     "CREATE INDEX IF NOT EXISTS idx_payroll_period ON payroll(cutoff_start, cutoff_end)",
+    // Uniqueness for the encrypted columns lives here rather than on the
+    // ciphertext: a fresh nonce per write means `employees.email`'s inline
+    // UNIQUE can no longer collide. SQLite treats NULLs as distinct, so rows
+    // awaiting the backfill — and employees with no company id — coexist.
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_email_bidx ON employees(email_bidx)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_company_id_bidx ON employees(company_id_bidx)",
 ];
 
 const REGISTRATION_INDEXES: &[&str] = &[

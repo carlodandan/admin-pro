@@ -3,6 +3,7 @@
 
 mod auth;
 mod commands;
+mod crypto;
 mod db;
 mod error;
 mod json;
@@ -119,20 +120,25 @@ pub fn run() {
         .expect("error while running Admin Pro");
 }
 
-/// `new DatabaseService()` plus `new AuthService()`: resolve the data
-/// directory, open the database, run the migrations, load the encryption key
-/// and connect to Supabase if it is configured.
+/// `new DatabaseService()` plus `new AuthService()`: resolve the data directory,
+/// open the database, run the migrations and connect to Supabase if it is
+/// configured. There is no key to load any more — the data key arrives from the
+/// cloud at login, or from the Credential Manager cache when offline.
 fn build_state(app: &tauri::AppHandle) -> Result<AppState, Box<dyn std::error::Error>> {
     let data_dir = state::resolve_data_dir(app);
     std::fs::create_dir_all(&data_dir)?;
 
     let db_path = data_dir.join("company-admin.sqlite");
-    let key_path = data_dir.join("encryption.key");
+    // Asked before opening, because `Connection::open` creates the file. This is
+    // the one signal that entitles the cloud to seed local.
+    let fresh_database = !db_path.exists();
+    if fresh_database {
+        println!("[DB] No local database found; the first login will seed from cloud");
+    }
 
     let connection = db::open(&db_path)?;
     db::initialize(&connection, &data_dir)?;
 
-    let secret_key = auth::crypto::initialize_encryption_key(&key_path, &data_dir);
     let supabase = Supabase::from_env();
     if supabase.is_none() {
         // `supabase.js` logged this and exported `null`; every cloud path is
@@ -144,8 +150,7 @@ fn build_state(app: &tauri::AppHandle) -> Result<AppState, Box<dyn std::error::E
         connection,
         data_dir,
         db_path,
-        key_path,
-        secret_key,
+        fresh_database,
         supabase,
         app.package_info().version.to_string(),
     ))

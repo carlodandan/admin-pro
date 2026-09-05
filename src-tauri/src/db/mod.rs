@@ -22,15 +22,20 @@ pub fn open(db_path: &Path) -> Result<Connection> {
     Ok(conn)
 }
 
-/// `DatabaseService.initializeDatabase()` — same order, same steps.
+/// `DatabaseService.initializeDatabase()`, plus the two steps that move an
+/// existing install onto cloud-only credentials and encrypted employee columns.
 pub fn initialize(conn: &Connection, data_dir: &Path) -> Result<()> {
     schema::create_tables(conn)?;
     migrations::migrate_payroll_columns(conn);
     schema::create_registration_table(conn)?;
+    // Before the legacy import, so it never has to fill a hash column that is
+    // on its way out.
+    migrations::migrate_credentials_to_cloud(conn, data_dir);
     migrations::migrate_database(conn);
     migrations::migrate_employees_table(conn);
     migrations::migrate_registration_table(conn, data_dir);
     migrations::migrate_sync_schema(conn);
+    migrations::migrate_field_encryption(conn);
     schema::create_triggers(conn)?;
     Ok(())
 }

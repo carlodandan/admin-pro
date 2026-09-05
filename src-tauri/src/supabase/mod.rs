@@ -20,8 +20,9 @@ use crate::error::AppError;
 const BUILD_URL: Option<&str> = option_env!("VITE_SUPABASE_URL");
 const BUILD_ANON_KEY: Option<&str> = option_env!("VITE_SUPABASE_ANON_KEY");
 
-/// A GoTrue session. `user` is kept as raw JSON so `user_metadata` reaches the
-/// callers that read it.
+/// A GoTrue session. `user` is kept as raw JSON so the display name in
+/// `user_metadata` reaches the caller. Nothing authorizes on that metadata — it
+/// is user-editable, so the admin check lives in `app_admins` behind RLS.
 #[derive(Clone, Debug)]
 pub struct Session {
     pub access_token: String,
@@ -121,6 +122,12 @@ impl Supabase {
     /// `supabase.auth.getSession()` — the sync gate.
     pub fn session(&self) -> Option<Session> {
         self.read_session()
+    }
+
+    /// Forget the session, so subsequent calls fall back to the anon key — which
+    /// under the deployed RLS can read nothing at all.
+    pub fn clear_session(&self) {
+        self.store_session(None);
     }
 
     /// The bearer token PostgREST should see: the signed-in user's if there is
@@ -331,3 +338,32 @@ impl Supabase {
 
 
 
+impl Supabase {
+    /// `supabase.auth.updateUser({ password })`. Requires the signed-in user's
+    /// JWT, which is the whole point: only someone holding a live session can
+    /// rotate the password, and GoTrue — not this app — stores the result.
+    pub async fn update_user_password(&self, password: &str) -> ApiResult<()> {
+        parse(
+            self.request(reqwest::Method::PUT, "/auth/v1/user")
+                .json(&json!({ "password": password }))
+                .send()
+                .await?,
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// `supabase.auth.resetPasswordForEmail(email)` — the only way to set a new
+    /// password without knowing the old one, because nothing local holds a
+    /// credential any more. Needs project SMTP to actually deliver.
+    pub async fn send_recovery_email(&self, email: &str) -> ApiResult<()> {
+        parse(
+            self.request(reqwest::Method::POST, "/auth/v1/recover")
+                .json(&json!({ "email": email }))
+                .send()
+                .await?,
+        )
+        .await?;
+        Ok(())
+    }
+}

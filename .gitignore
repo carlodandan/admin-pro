@@ -109,3 +109,13 @@ commit_msg.txt
 *.key
 signkey/adminpro.key
 signkey/adminpro.key.pub
+
+# Agentic
+.claude/
+.agents/
+
+# MCP Config File
+.mcp.json
+
+# Supabase
+supabase/

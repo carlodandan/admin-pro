@@ -6,7 +6,7 @@ authors = ["Carlo Dandan <carlodandan.personal@proton.me>"]
 license = "MIT"
 repository = "https://github.com/carlodandan/admin-pro"
 edition = "2021"
-rust-version = "1.77.2"
+rust-version = "1.88"
 
 # The library is what Tauri's mobile/desktop entry points share.
 [lib]
@@ -28,12 +28,26 @@ serde_json = "1"
 # Local database
 rusqlite = { version = "0.32", features = ["bundled", "serde_json"] }
 
-# Crypto: bcrypt password hashing + AES-256-GCM at-rest encryption
-bcrypt = "0.15"
+# Crypto. There is deliberately no password hashing here any more: GoTrue owns
+# credentials, and the AES-256-GCM data key is only ever held wrapped.
 aes-gcm = "0.10"
 rand = "0.8"
 sha2 = "0.10"
 hex = "0.4"
+base64 = "0.22"
+
+# Argon2id turns the admin password into a key-encryption key; HKDF derives the
+# blind-index key from the data key so it needs no storage of its own.
+argon2 = "0.6.0"
+hkdf = "0.12"
+hmac = "0.12"
+
+# Key material is cleared on drop, and PINs compare in constant time.
+zeroize = "1"
+subtle = "2"
+
+# Windows Credential Manager holds the offline grace cache.
+keyring = { version = "4.2.0", features = ["windows-native-keyring-store"] }
 
 # Cloud database (Supabase REST / GoTrue)
 reqwest = { version = "0.12", default-features = false, features = [

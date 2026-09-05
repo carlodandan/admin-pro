@@ -17,8 +17,9 @@ pub enum AppError {
     #[error("{0}")]
     Http(#[from] reqwest::Error),
 
+    /// The Windows Credential Manager entry that backs the offline grace cache.
     #[error("{0}")]
-    Bcrypt(#[from] bcrypt::BcryptError),
+    Keyring(#[from] keyring::Error),
 
     #[error("{0}")]
     Tauri(#[from] tauri::Error),
