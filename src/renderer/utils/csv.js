@@ -36,5 +36,8 @@ export const downloadCsv = (filename, csv) => {
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  // Revoked on a later task, not in this one. The download reads the blob
+  // asynchronously, so revoking in the same tick as the click is a race the
+  // download can lose — and it loses silently, with no error and no file.
+  setTimeout(() => URL.revokeObjectURL(url), 30_000);
 };

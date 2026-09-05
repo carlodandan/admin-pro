@@ -86,7 +86,7 @@ const REGISTRATION_TABLE: &str = r#"CREATE TABLE IF NOT EXISTS registration_cred
     super_admin_password_hash TEXT NOT NULL,
     avatar TEXT,
     bio TEXT,
-    theme_preference TEXT DEFAULT 'light',
+    theme_preference TEXT DEFAULT 'dark',
     language TEXT DEFAULT 'en',
     is_registered INTEGER DEFAULT 0,
     license_key TEXT UNIQUE,

@@ -63,7 +63,9 @@ pub fn save_profile(conn: &Connection, data: &Value) -> Result<Value> {
             nullable("email"),
             nullable("avatar"),
             nullable("bio"),
-            with_default("themePreference", "light"),
+            // `dark` where the original said `light`: the column is written and
+            // never read back, and this build only draws the dark palette.
+            with_default("themePreference", "dark"),
             with_default("language", "en"),
         ],
     )?;

@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capabilities required by the Admin Pro main window.",
+  "description": "Capabilities required by the Admin Pro main window. No fs or shell permission is granted: the webview reaches the disk and the database only through this app's own commands. The window, dialog, opener and clipboard entries below are broader than the webview strictly needs, because those plugins are driven from Rust (menu.rs and commands/window.rs), which the ACL does not gate; only core:event is required for the two listeners in services/api.js.",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -10,12 +10,10 @@
     "core:window:allow-maximize",
     "core:window:allow-unmaximize",
     "core:window:allow-is-maximized",
-    "core:window:allow-start-dragging",
     "core:window:allow-set-focus",
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "dialog:allow-message",
-    "dialog:allow-save",
     "opener:allow-open-url",
     "clipboard-manager:allow-write-text"
   ]

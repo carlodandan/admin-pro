@@ -104,3 +104,8 @@ commit_msg.txt
 
 # VSCode
 .vscode/
+
+# Sign Key
+*.key
+signkey/adminpro.key
+signkey/adminpro.key.pub

@@ -100,7 +100,10 @@ const Settings = () => {
     bio: ''
   });
 
-  const [preferences, setPreferences] = useState({ theme: 'light', language: 'en' });
+  // Defaulted to `dark`, not the original's `light`: nothing reads the column
+  // back, and offering "Light" as the selected value in an app that only draws
+  // the dark palette states something untrue about the build.
+  const [preferences, setPreferences] = useState({ theme: 'dark', language: 'en' });
 
   const [company, setCompany] = useState({
     company_name: '',
@@ -181,7 +184,7 @@ const Settings = () => {
         bio: stored?.bio || ''
       });
       setPreferences({
-        theme: stored?.theme_preference || 'light',
+        theme: stored?.theme_preference || 'dark',
         language: stored?.language || 'en'
       });
     } catch (error) {
