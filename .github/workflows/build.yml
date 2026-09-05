@@ -1,75 +1,181 @@
 name: Build Admin Pro
 
+# Manual only. The build inlines the Supabase project URL and anon key into the
+# installer, so it should be a deliberate act tied to a specific commit rather
+# than something that fires on every push.
 on:
   workflow_dispatch:
+    inputs:
+      draft:
+        description: "Create the release as a draft"
+        type: boolean
+        default: false
+      run_checks:
+        description: "Run ESLint, Clippy and cargo test before building"
+        type: boolean
+        default: true
 
 jobs:
   build-windows:
+    # Windows only: the bundle target is NSIS and the offline credential cache
+    # uses the Windows Credential Manager.
     runs-on: windows-2025
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     permissions:
       contents: write
 
+    env:
+      # Pinned to the local development environment. Keep these aligned.
+      NODE_VERSION: "24.16.0"
+      PNPM_VERSION: "11.21.0"
+
     steps:
-      # 1. Check out the repository code
-      - name: Checkout Code
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2. Setup PNPM environment
-      - uses: pnpm/action-setup@v4
-        with:
-          # Keep aligned with local environment
-          version: 10.28.2
+      # Fail in seconds rather than after a full Rust build, and without ever
+      # printing the values. An empty VITE_SUPABASE_* produces an installer that
+      # builds cleanly and then cannot reach Supabase at all.
+      - name: Check required secrets
+        shell: bash
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: |
+          missing=0
+          [ -n "$VITE_SUPABASE_URL" ]      || { echo "::error::VITE_SUPABASE_URL is not set"; missing=1; }
+          [ -n "$VITE_SUPABASE_ANON_KEY" ] || { echo "::error::VITE_SUPABASE_ANON_KEY is not set"; missing=1; }
+          if [ "$missing" -ne 0 ]; then
+            echo "Add both under Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+          echo "Both secrets are present."
 
-      # 3. Setup Node.js environment
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          # Keep aligned with local environment
-          node-version: "24.7.0"
+          node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
-      # 4. Install dependencies cleanly
-      - name: Install Dependencies
-        run: pnpm install
+      # This is a Tauri application: the backend is Rust and there is no
+      # prebuilt native module to download. Without a toolchain the build fails
+      # at the first cargo invocation.
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
-      # 5. Build the application (electron-forge publish)
-      - name: Build
+      # A cold Rust build of the dependency tree takes several minutes. Keyed on
+      # Cargo.lock, scoped to the src-tauri workspace.
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint frontend
+        if: ${{ inputs.run_checks }}
+        run: pnpm run lint
+
+      # Clippy is clean on this tree, so warnings are treated as errors to keep
+      # it that way.
+      - name: Clippy
+        if: ${{ inputs.run_checks }}
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+      # Covers the crypto module: wrap/unwrap round-trips, idempotent field
+      # encryption, blind-index determinism, recovery-key canonicalisation.
+      - name: Rust tests
+        if: ${{ inputs.run_checks }}
+        working-directory: src-tauri
+        run: cargo test
+
+      # `pnpm make` runs `tauri build`, which runs `pnpm run build` (Vite ->
+      # dist/) via beforeBuildCommand, then compiles the release binary and
+      # produces the NSIS installer.
+      - name: Build installer
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
         run: pnpm run make
 
-      # 6. Set Other Variables
-      - name: Set Other Variables
+      - name: Collect release metadata
         shell: bash
         run: |
-          echo "BUILD_DATE=$(date +%Y%m%d)" >> $GITHUB_ENV
+          # tauri.conf.json is authoritative for the version: it is what names
+          # the installer.
+          echo "APP_VERSION=$(jq -r '.version' src-tauri/tauri.conf.json)" >> $GITHUB_ENV
+          echo "BUILD_DATE=$(date +%Y-%m-%d)" >> $GITHUB_ENV
           echo "COMMIT_ID=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
-          echo "APP_VERSION=$(jq -r '.version' package.json)" >> $GITHUB_ENV
-          echo "VITE_VER=$(jq -r '.devDependencies.vite' package.json)" >> $GITHUB_ENV
-          echo "ELECTRON_VER=$(jq -r '.devDependencies.electron' package.json)" >> $GITHUB_ENV
-          echo "BETTER_SQLITE3=$(jq -r '.dependencies.better-sqlite3' package.json)" >> $GITHUB_ENV
+
           echo "REACT_VER=$(jq -r '.dependencies.react' package.json)" >> $GITHUB_ENV
           echo "TAILWIND_VER=$(jq -r '.dependencies.tailwindcss' package.json)" >> $GITHUB_ENV
+          echo "VITE_VER=$(jq -r '.devDependencies.vite' package.json)" >> $GITHUB_ENV
+          echo "TAURI_CLI_VER=$(jq -r '.devDependencies["@tauri-apps/cli"]' package.json)" >> $GITHUB_ENV
 
-      # 7. Upload the Build
-      - name: Upload to Release (Admin Pro)
+          # Resolved crate versions, read from the lockfile rather than the
+          # requirement in Cargo.toml.
+          crate_version() {
+            grep -A1 "^name = \"$1\"\$" src-tauri/Cargo.lock | grep '^version' | head -1 | cut -d'"' -f2
+          }
+          echo "TAURI_VER=$(crate_version tauri)" >> $GITHUB_ENV
+          echo "RUSQLITE_VER=$(crate_version rusqlite)" >> $GITHUB_ENV
+          echo "RUSTC_VER=$(rustc --version | cut -d' ' -f2)" >> $GITHUB_ENV
+          echo "MSRV=$(grep '^rust-version' src-tauri/Cargo.toml | cut -d'"' -f2)" >> $GITHUB_ENV
+
+      # Retained even on a release run: the release can be deleted, the artifact
+      # is what you debug a failed install with.
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: admin-pro-${{ env.APP_VERSION }}-${{ env.COMMIT_ID }}-nsis
+          path: src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            out/make/squirrel.windows/x64/*
-          name: Admin Pro - Windows 64-bit || ${{ env.BUILD_DATE }}
+          files: src-tauri/target/release/bundle/nsis/*-setup.exe
+          name: Admin Pro ${{ env.APP_VERSION }} — Windows x64 (${{ env.BUILD_DATE }})
           tag_name: ap-${{ env.COMMIT_ID }}
+          draft: ${{ inputs.draft }}
+          fail_on_unmatched_files: true
           body: |
-            Build: Windows 64-bit (using Squirrel.Windows)
-            Version: ${{ env.APP_VERSION }}
-            Commit: Most recent [commit](https://github.com/carlodandan/admin-pro/commit/${{ env.COMMIT_ID }}) during building process.
-            
-            Major Dependencies:
-            - Vite: ${{ env.VITE_VER }}
-            - Electron: ${{ env.ELECTRON_VER }}
-            - SQLite3: ${{ env.BETTER_SQLITE3_VER }}
-            - React: ${{ env.REACT_VER }}
-            - Tailwind CSS: ${{ env.TAILWIND_VER }}
+            **Admin Pro ${{ env.APP_VERSION }}** — Windows x64 installer (NSIS, per-user install, no elevation required).
+
+            Built from [`${{ env.COMMIT_ID }}`](https://github.com/carlodandan/admin-pro/commit/${{ env.COMMIT_ID }}) on ${{ env.BUILD_DATE }}.
+
+            **Runtime**
+            | Component | Version |
+            |---|---|
+            | Tauri | ${{ env.TAURI_VER }} |
+            | Tauri CLI | ${{ env.TAURI_CLI_VER }} |
+            | rustc | ${{ env.RUSTC_VER }} (MSRV ${{ env.MSRV }}) |
+            | rusqlite | ${{ env.RUSQLITE_VER }} (bundled SQLite) |
+            | React | ${{ env.REACT_VER }} |
+            | Tailwind CSS | ${{ env.TAILWIND_VER }} |
+            | Vite | ${{ env.VITE_VER }} |
+
+            **Before installing**
+
+            This build is bound to the Supabase project configured in the repository secrets.
+            The project schema must already be applied — see
+            [`docs/SUPABASE_SETUP.md`](https://github.com/carlodandan/admin-pro/blob/main/docs/SUPABASE_SETUP.md).
+
+            The first launch requires an internet connection. Registration displays a
+            **64-character recovery key exactly once** — save it before continuing. Without it,
+            a lost administrator password means the encrypted employee columns cannot be
+            recovered.
+
+            **Requirements:** Windows 10/11 x64 and the WebView2 runtime (preinstalled on
+            Windows 11 and on up-to-date Windows 10).
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

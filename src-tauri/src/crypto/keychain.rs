@@ -133,8 +133,12 @@ pub fn load() -> Result<Option<CachedSession>> {
     Ok(Some(session))
 }
 
-/// Forget the cached session — on sign-out, and whenever the cloud rejects the
-/// credentials the cache was built from.
+/// Forget the cached session. Called from `reset_registration`, and when the
+/// stored entry cannot be parsed. Deliberately *not* called on sign-out: the
+/// cache is what makes the next offline launch possible, and clearing it there
+/// would mean sign-out silently revoked offline access. A cloud rejection does
+/// not clear it either — GoTrue decides first, so a bad password never reaches
+/// this module.
 pub fn clear() -> Result<()> {
     match entry()?.delete_credential() {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
