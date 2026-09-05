@@ -1,7 +1,19 @@
 /**
- * Sign-in. The flow is unchanged: `onLogin` comes from `App.jsx`, which calls
- * `loginUser` and seeds the session, and the remembered address still lives in
- * `localStorage` under `rememberedEmail`.
+ * Sign-in. `onLogin` comes from `App.jsx`, which calls `loginUser` and seeds the
+ * session, and the remembered address still lives in `localStorage` under
+ * `rememberedEmail`.
+ *
+ * Credentials are the cloud's now, which gives this screen three outcomes rather
+ * than two:
+ *
+ *  - signed in against Supabase, the ordinary case;
+ *  - signed in from the cached unlock, when the network is unreachable but this
+ *    device has signed in within the grace window. The remaining grace is named
+ *    here and remembered for the app header, because this screen is replaced the
+ *    instant `App.jsx` flips its state;
+ *  - a connection is required — no cache, or the grace has lapsed. That is not a
+ *    wrong password, so it does not mark the fields invalid; the distinction is
+ *    the difference between "try again" and "get online".
  *
  * The original read `companyInfo.registered_at`, a column that does not exist —
  * `new Date(undefined).toLocaleDateString()` printed "Invalid Date" under the
@@ -13,6 +25,7 @@ import { Link } from 'react-router-dom';
 import {
   AlertCircle,
   CheckCircle,
+  CloudOff,
   Eye,
   EyeOff,
   Loader2,
@@ -23,6 +36,15 @@ import {
 import { useUser } from '../contexts/UserContext';
 import { formatUtcStoredDate } from '../utils/manila';
 
+/** `2026-09-12T07:10:58+00:00` as a Manila date and time. */
+const graceDeadline = (value) =>
+  formatUtcStoredDate(value, {
+    month: 'short',
+    day: '2-digit',
+    hour: 'numeric',
+    minute: '2-digit'
+  });
+
 const LoginPage = ({ onLogin }) => {
   const { updateUser } = useUser();
 
@@ -31,6 +53,9 @@ const LoginPage = ({ onLogin }) => {
   const [rememberMe, setRememberMe] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  // Held apart from `error` on purpose: `error` also marks both fields invalid,
+  // and nothing is wrong with what was typed when the problem is the network.
+  const [connectionError, setConnectionError] = useState('');
   const [success, setSuccess] = useState('');
   const [companyInfo, setCompanyInfo] = useState(null);
 
@@ -56,6 +81,7 @@ const LoginPage = ({ onLogin }) => {
     const { value } = event.target;
     setCredentials((previous) => ({ ...previous, [field]: value }));
     if (error) setError('');
+    if (connectionError) setConnectionError('');
   };
 
   const handleSubmit = async (event) => {
@@ -68,6 +94,7 @@ const LoginPage = ({ onLogin }) => {
 
     setIsLoading(true);
     setError('');
+    setConnectionError('');
     setSuccess('');
 
     try {
@@ -93,7 +120,32 @@ const LoginPage = ({ onLogin }) => {
         // `App.jsx` swaps the route the moment its state flips, so this shows
         // for an instant. It stays because the button is disabled by then and
         // a dead-looking form is worse than a redundant line.
-        setSuccess('Signed in. Opening your dashboard…');
+        //
+        // Which is also why the offline grace is written to `localStorage`: a
+        // line that appears for one frame is not how you tell someone their
+        // access expires on a date. The header reads it back and keeps saying so.
+        if (result.offline) {
+          const days = result.graceDaysRemaining ?? 0;
+          const until = result.graceExpiresAt ? graceDeadline(result.graceExpiresAt) : null;
+          localStorage.setItem(
+            'offlineGrace',
+            JSON.stringify({ days, expiresAt: result.graceExpiresAt ?? null })
+          );
+          setSuccess(
+            `Signed in offline. Cached access lasts ${days} more ${days === 1 ? 'day' : 'days'}` +
+              `${until ? `, until ${until}` : ''}. Connect to renew it.`
+          );
+        } else {
+          localStorage.removeItem('offlineGrace');
+          setSuccess('Signed in. Opening your dashboard…');
+        }
+      } else if (result.requiresConnection) {
+        // Either this device has never signed in with this account, or its
+        // seven days have run out. The backend deletes a lapsed cache before
+        // answering, so both arrive here and both need the same thing.
+        setConnectionError(
+          result.error || 'This device needs an internet connection to sign in.'
+        );
       } else {
         setError(result.error || 'That email and password did not match.');
       }
@@ -214,6 +266,17 @@ const LoginPage = ({ onLogin }) => {
               </p>
             )}
 
+            {connectionError && (
+              <div className="alert alert-warning" role="alert">
+                <CloudOff size={16} aria-hidden="true" />
+                <span>
+                  {connectionError} Passwords live in the cloud, so the first
+                  sign-in on a device has to reach it. After that this machine can
+                  sign in offline for seven days at a time.
+                </span>
+              </div>
+            )}
+
             {success && (
               <div className="alert alert-success" role="status" aria-live="polite">
                 <CheckCircle size={16} aria-hidden="true" />
@@ -236,7 +299,8 @@ const LoginPage = ({ onLogin }) => {
           <p className="help-text">
             <Lock size={13} aria-hidden="true" />
             One administrator account per installation. Without the password, the
-            super admin password on the forgot-password screen is the way back in.
+            recovery key issued at setup — entered on the forgot-password screen —
+            is the way back in.
           </p>
         </div>
 

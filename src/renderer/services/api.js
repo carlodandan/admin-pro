@@ -34,6 +34,7 @@ const api = {
   changePassword: (userId, currentPassword, newPassword) =>
     invoke('change_password', { userId, currentPassword, newPassword }),
   loginUser: (email, password) => invoke('login_user', { email, password }),
+  logoutUser: () => invoke('logout_user'),
   resetAdminPassword: (email, superAdminPassword, newPassword) =>
     invoke('reset_admin_password', { email, superAdminPassword, newPassword }),
   verifySuperAdminPassword: (email, superAdminPassword) =>

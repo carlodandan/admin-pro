@@ -21,19 +21,25 @@ pub fn backup_auth_database(state: Shared<'_>) -> Reply {
 
 /// `auth:change-password`. The preload calls the first argument `userId`, but
 /// the handler passed it straight through as the admin's email.
+///
+/// Async now: the password lives in GoTrue and the key has to be re-sealed in the
+/// same breath, so this cannot be done without the network.
 #[tauri::command]
-pub fn change_password(
+pub async fn change_password(
     state: Shared<'_>,
     user_id: String,
     current_password: String,
     new_password: String,
 ) -> Reply {
+    let supabase = state.supabase.clone();
     Ok(auth::change_admin_password(
         &state,
+        supabase.as_ref(),
         &user_id,
         &current_password,
         &new_password,
-    ))
+    )
+    .await)
 }
 
 /// `auth:get-registration-info`.
@@ -55,12 +61,19 @@ pub async fn is_system_registered(state: Shared<'_>) -> Reply {
 /// `auth:login`. A successful login also kicks off a sync, exactly as the
 /// handler did with `dbService.syncToSupabase().catch(...)` — fired and
 /// forgotten, its failures logged and never surfaced to the caller.
+///
+/// Between the two there is now one added step: login is the first moment the
+/// data key exists in this process, so it is the only place the encryption
+/// backfill can run — and it has to run before the sync, or plaintext would be
+/// pushed to the cloud.
 #[tauri::command]
 pub async fn login_user(state: Shared<'_>, email: String, password: String) -> Reply {
     let supabase = state.supabase.clone();
     let result = auth::verify_admin_login(&state, supabase.as_ref(), &email, &password).await;
 
     if result.get("success").and_then(Value::as_bool) == Some(true) {
+        backfill_encryption(&state);
+
         if let Some(supabase) = supabase {
             let shared = state.inner().clone();
             tauri::async_runtime::spawn(sync::sync_all(shared, supabase));
@@ -68,6 +81,44 @@ pub async fn login_user(state: Shared<'_>, email: String, password: String) -> R
     }
 
     Ok(result)
+}
+
+/// `auth:logout`.
+///
+/// The frontend used to sign out by itself, by emptying `localStorage`, which
+/// left the backend holding the data key. This exists to make the two agree.
+///
+/// It answers immediately: the key and the session are gone before this returns,
+/// and the revoke runs detached so a dead link cannot make signing out slow or
+/// fail. There is nothing to report back from it — the client has already
+/// forgotten the token either way.
+#[tauri::command]
+pub fn logout_user(state: Shared<'_>) -> Reply {
+    let supabase = state.supabase.clone();
+    let token = auth::sign_out(&state, supabase.as_ref());
+
+    if let (Some(supabase), Some(token)) = (supabase, token) {
+        tauri::async_runtime::spawn(async move {
+            if let Err(error) = supabase.revoke(&token).await {
+                eprintln!("Could not revoke the cloud session: {error}");
+            }
+        });
+    }
+
+    Ok(json!({ "success": true, "message": "Signed out" }))
+}
+
+/// Encrypt any employee row still holding plaintext, now that there is a key to
+/// do it with. A no-op on every login after the first, so it is not gated on a
+/// flag — see `db::migrations::backfill_employee_encryption`.
+fn backfill_encryption(state: &Shared<'_>) {
+    let Ok(dek) = state.dek() else {
+        return;
+    };
+    if let Err(error) = state.with_db(|conn| db::migrations::backfill_employee_encryption(conn, &dek))
+    {
+        eprintln!("Could not encrypt employee data at rest: {error}");
+    }
 }
 
 /// `auth:register`.
@@ -84,15 +135,15 @@ pub async fn register_system(state: Shared<'_>, registration_data: Value) -> Rep
         };
 
     // The handler then seeded the profile row. `saveUserProfile` reads
-    // `themePreference`, not `theme_preference`, so the theme has always come
-    // from that function's own `'light'` default — the same value either way.
+    // `themePreference`, not `theme_preference`, so the theme comes from that
+    // function's own default — passed here as the same value for clarity.
     let profile = json!({
         "email": registration_data.get("admin_email").cloned().unwrap_or(Value::Null),
         "displayName": registration_data.get("admin_name").cloned().unwrap_or(Value::Null),
         "position": "System Administrator",
         "bio": "System administrator with full access to all features.",
         "role": "Admin",
-        "theme_preference": "light",
+        "theme_preference": "dark",
         "language": "en",
     });
     if let Err(error) = state.with_db(|conn| db::users::save_profile(conn, &profile)) {
@@ -103,20 +154,24 @@ pub async fn register_system(state: Shared<'_>, registration_data: Value) -> Rep
     Ok(ok_data(result))
 }
 
-/// `auth:reset-admin-password`.
+/// `auth:reset-admin-password`. The second argument still arrives under the name
+/// `superAdminPassword`, which is now the generated recovery key.
 #[tauri::command]
-pub fn reset_admin_password(
+pub async fn reset_admin_password(
     state: Shared<'_>,
     email: String,
     super_admin_password: String,
     new_password: String,
 ) -> Reply {
+    let supabase = state.supabase.clone();
     Ok(auth::reset_admin_password(
         &state,
+        supabase.as_ref(),
         &email,
         &super_admin_password,
         &new_password,
-    ))
+    )
+    .await)
 }
 
 /// `auth:reset-registration`.
@@ -143,18 +198,18 @@ pub fn update_company_info(state: Shared<'_>, company_data: Value) -> Reply {
     })
 }
 
-/// `auth:verify-super-admin`.
+/// `auth:verify-super-admin` — the recovery key, checked by using it.
 #[tauri::command]
-pub fn verify_super_admin_password(
+pub async fn verify_super_admin_password(
     state: Shared<'_>,
     email: String,
     super_admin_password: String,
 ) -> Reply {
-    Ok(auth::verify_super_admin_password(
-        &state,
-        &email,
-        &super_admin_password,
-    ))
+    let supabase = state.supabase.clone();
+    Ok(
+        auth::verify_super_admin_password(supabase.as_ref(), &email, &super_admin_password)
+            .await,
+    )
 }
 
 // The three multi-user channels below were placeholders. Nothing in the

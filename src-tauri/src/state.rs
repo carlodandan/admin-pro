@@ -89,10 +89,6 @@ impl AppState {
         *self.dek_guard_mut() = None;
     }
 
-    pub fn is_unlocked(&self) -> bool {
-        self.dek_guard().is_some()
-    }
-
     /// The data key, or an error naming what the caller has to do about it.
     ///
     /// Every read and write of an encrypted column goes through here, so a

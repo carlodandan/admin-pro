@@ -52,6 +52,10 @@ function App() {
         localStorage.removeItem('authToken');
         localStorage.removeItem('userInfo');
         localStorage.removeItem('loginTimestamp');
+        // The backend decides afresh, on the next sign-in, whether this device
+        // is still inside its offline grace. Carrying the last answer over would
+        // let the header advertise days that may already be gone.
+        localStorage.removeItem('offlineGrace');
         sessionStorage.setItem('appSessionActive', '1');
       }
 
@@ -71,6 +75,7 @@ function App() {
             localStorage.removeItem('authToken');
             localStorage.removeItem('userInfo');
             localStorage.removeItem('loginTimestamp');
+            localStorage.removeItem('offlineGrace');
           } else {
             const savedUser = localStorage.getItem('userInfo');
             if (savedUser) {
@@ -89,16 +94,19 @@ function App() {
 
   const handleRegistration = async (registrationData) => {
     try {
-
       const result = await window.api.registerSystem(registrationData);
 
-
-
       if (result.success) {
-        // Return the success result with the super admin password
+        // `register_system` answers `{ success, data }`, and the key is inside
+        // `data`. Reading it off the top level — as this did — always found
+        // `undefined`, and the page then fell back to displaying a key it had
+        // generated itself, which unwraps nothing. The key is the cloud's now:
+        // it is generated during registration, sealed under the password and
+        // under itself, and this is the only moment it is ever readable.
         return {
           success: true,
-          superAdminPassword: result.superAdminPassword // Make sure backend returns this
+          recoveryKey: result.data?.recoveryKey ?? null,
+          recoveryKeyIssued: result.data?.recoveryKeyIssued === true
         };
       }
       return { success: false, error: result.error || 'Registration failed' };
@@ -152,21 +160,47 @@ function App() {
           console.warn('Could not load the stored profile on login:', dbError);
         }
 
-        return { success: true, user: userData };
+        // The grace fields travel with the result rather than into
+        // `localStorage`: they describe the *backend's* cached unlock, which
+        // expires on its own schedule, and a stale copy in storage would tell
+        // the user they have days left after the cache has already gone.
+        return {
+          success: true,
+          user: userData,
+          offline: result.offline === true,
+          graceDaysRemaining: result.graceDaysRemaining ?? null,
+          graceExpiresAt: result.graceExpiresAt ?? null
+        };
       }
-      return { success: false, error: result.error };
+      // `requiresConnection` separates "this device has never been online with
+      // this account, or its grace has lapsed" from a wrong password. The two
+      // need different words on screen, and only the backend can tell them apart.
+      return {
+        success: false,
+        error: result.error,
+        requiresConnection: result.requiresConnection === true
+      };
     } catch (error) {
       console.error('Login error:', error);
       return { success: false, error: 'Login failed' };
     }
   };
 
-  // Function for password reset
-  const handlePasswordReset = async (email, superAdminPassword, newPassword) => {
+  // Password reset. The second argument is the recovery key issued at
+  // registration; `api.js` still calls it `superAdminPassword` because that is
+  // the Tauri command's parameter name.
+  //
+  // The result is passed straight through, including its failure shapes: with no
+  // live session — which is the normal state of the forgot-password screen — the
+  // backend answers `success: false` with `recoveryKeyVerified: true` and
+  // `emailSent`, meaning the key was accepted and the new password is chosen
+  // through the emailed link. Collapsing that into a generic error here would
+  // report a working path as a broken one.
+  const handlePasswordReset = async (email, recoveryKey, newPassword) => {
     try {
       const result = await window.api.resetAdminPassword(
         email,
-        superAdminPassword,
+        recoveryKey,
         newPassword
       );
       return result;
@@ -176,10 +210,22 @@ function App() {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    // The backend goes first. It holds the data key and the cloud session, and
+    // dropping the key is the half that actually re-protects the encrypted
+    // columns — clearing localStorage only hides the UI. It answers immediately
+    // and cannot fail for want of a connection, but a rejection still must not
+    // strand the user on a signed-in screen, so the local clear is unconditional.
+    try {
+      await window.api.logoutUser();
+    } catch (error) {
+      console.error('Error signing out of the backend:', error);
+    }
+
     localStorage.removeItem('authToken');
     localStorage.removeItem('userInfo');
     localStorage.removeItem('loginTimestamp');
+    localStorage.removeItem('offlineGrace');
     setUserInfo(null);
     setIsAuthenticated(false);
   };

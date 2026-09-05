@@ -1,13 +1,18 @@
 /**
- * One-time setup: the company record, the administrator account, and the super
- * admin password that is the only way to reset that account later. `onRegister`
- * still does the write, and the generated password is still shown exactly once.
+ * One-time setup: the company record, the administrator account, and the
+ * recovery key that is the only way back in if the password is lost.
+ *
+ * The key is no longer made here. Registration generates it in the backend,
+ * seals the encryption key under both it and the password, and hands both blobs
+ * to Supabase; what comes back is the one and only readable copy. This page
+ * displays that copy and never keeps it. A key generated in the browser — which
+ * is what this page used to do — would unwrap nothing.
  *
  * Three fixes to the original, all invisible until they bite:
  *  - it sent `company_phone`, and `register_system` inserts `company_contact`,
  *    so the number typed here was thrown away;
- *  - it built a 16-character recovery credential out of `Math.random()`, which
- *    is not a cryptographic generator. `crypto.getRandomValues` is;
+ *  - it displayed its own locally generated string, so the credential the user
+ *    wrote down was not the one the escrow blob was sealed with;
  *  - the last button set `window.location.href = '/dashboard'`, which under a
  *    HashRouter reloads the app at a path it does not serve — and registering
  *    does not sign anyone in, so the honest destination is the sign-in screen.
@@ -35,27 +40,12 @@ import {
 
 const MIN_PASSWORD_LENGTH = 8;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const SUPER_ADMIN_LENGTH = 16;
-const CHARSET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
-
 /**
- * A rejection-sampled draw from `CHARSET`: bytes at or above the largest
- * multiple of the alphabet size are discarded, so every character is equally
- * likely. `byte % 70` on its own would favour the first 46 characters.
+ * The key arrives as thirteen four-character groups. Masking it group-shape
+ * intact keeps the field the same size whether it is revealed or hidden, so
+ * toggling does not make the layout jump.
  */
-const generateSuperAdminPassword = () => {
-  const limit = 256 - (256 % CHARSET.length);
-  const picked = [];
-  const bytes = new Uint8Array(SUPER_ADMIN_LENGTH);
-  while (picked.length < SUPER_ADMIN_LENGTH) {
-    crypto.getRandomValues(bytes);
-    for (const byte of bytes) {
-      if (picked.length === SUPER_ADMIN_LENGTH) break;
-      if (byte < limit) picked.push(CHARSET[byte % CHARSET.length]);
-    }
-  }
-  return picked.join('');
-};
+const maskKey = (key) => key.replace(/[^-]/g, '•');
 
 /** The label / icon / error / help arrangement all eight fields here repeat. */
 const Field = ({ id, label, icon: Icon, error, help, required, children, ...inputProps }) => (
@@ -114,13 +104,18 @@ const RegistrationPage = ({ onRegister }) => {
     admin_password: '',
     confirm_password: ''
   });
-  // `superAdmin` starts revealed: the whole point of the last screen is to read
+  // `recovery` starts revealed: the whole point of the last screen is to read
   // that string off and write it down.
-  const [reveal, setReveal] = useState({ password: false, confirm: false, superAdmin: true });
+  const [reveal, setReveal] = useState({ password: false, confirm: false, recovery: true });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [formErrors, setFormErrors] = useState({});
-  const [superAdminPassword, setSuperAdminPassword] = useState('');
+  const [recoveryKey, setRecoveryKey] = useState('');
+  // Tracked separately from the key rather than inferred from it. A registration
+  // that adopted an existing keyring succeeds with no key to show, and keying
+  // "are we past the form" off an empty string would send that case back to a
+  // form it must not submit twice.
+  const [registered, setRegistered] = useState(false);
   const [copied, setCopied] = useState(false);
   const [acknowledged, setAcknowledged] = useState(false);
 
@@ -136,14 +131,14 @@ const RegistrationPage = ({ onRegister }) => {
   const toggleReveal = (field) => () =>
     setReveal((previous) => ({ ...previous, [field]: !previous[field] }));
 
-  const copyPassword = async () => {
+  const copyRecoveryKey = async () => {
     try {
-      await navigator.clipboard.writeText(superAdminPassword);
+      await navigator.clipboard.writeText(recoveryKey);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (copyError) {
       console.error('Clipboard error:', copyError);
-      setError('That could not be copied. Select the password and copy it by hand.');
+      setError('That could not be copied. Select the key and copy it by hand.');
     }
   };
   const handleSubmit = async (event) => {
@@ -176,8 +171,6 @@ const RegistrationPage = ({ onRegister }) => {
     setError('');
 
     try {
-      const generated = generateSuperAdminPassword();
-
       const result = await onRegister({
         company_name: formData.company_name,
         company_address: formData.company_address || '',
@@ -187,14 +180,16 @@ const RegistrationPage = ({ onRegister }) => {
         company_email: formData.company_email,
         admin_name: formData.admin_name,
         admin_email: formData.admin_email,
-        admin_password: formData.admin_password,
-        super_admin_password: generated
+        admin_password: formData.admin_password
       });
 
       if (result.success) {
-        // Only held once the write succeeded: the original set it first, so a
-        // failed registration still left a password in state.
-        setSuperAdminPassword(result.superAdminPassword || generated);
+        // Whatever the backend issued, verbatim. There is deliberately no
+        // fallback: a locally invented key would open nothing, and handing one
+        // over as if it were the escrow credential is worse than saying plainly
+        // that none was issued.
+        setRecoveryKey(result.recoveryKey || '');
+        setRegistered(true);
       } else {
         setError(result.error || 'The system could not be registered.');
       }
@@ -205,9 +200,19 @@ const RegistrationPage = ({ onRegister }) => {
       setIsLoading(false);
     }
   };
-  // The password only exists after a successful write, so it doubles as the
-  // "we are past the form" flag the original kept in a second state.
-  const registered = superAdminPassword !== '';
+  // A successful registration that issued no new key: the project already held
+  // one, so the key from the first setup is still the escrow credential.
+  const adoptedExistingKey = registered && recoveryKey === '';
+
+  let title = 'Set up Admin Pro';
+  let subtitle = 'One company, one administrator. This runs once.';
+  if (adoptedExistingKey) {
+    title = 'Registered';
+    subtitle = 'Nothing new to write down.';
+  } else if (registered) {
+    title = 'Save your recovery key';
+    subtitle = 'This is the last time it will be shown.';
+  }
 
   return (
     // `body` is `overflow: hidden`, so this screen owns its own scrolling.
@@ -223,14 +228,8 @@ const RegistrationPage = ({ onRegister }) => {
 
       <div className="relative z-10 w-full max-w-3xl">
         <div className="mb-6 text-center">
-          <h1 className="page-title">
-            {registered ? 'Save your recovery password' : 'Set up Admin Pro'}
-          </h1>
-          <p className="page-subtitle mt-1">
-            {registered
-              ? 'This is the last time it will be shown.'
-              : 'One company, one administrator. This runs once.'}
-          </p>
+          <h1 className="page-title">{title}</h1>
+          <p className="page-subtitle mt-1">{subtitle}</p>
         </div>
 
         {!registered ? (
@@ -361,9 +360,11 @@ const RegistrationPage = ({ onRegister }) => {
             <div className="alert alert-warning">
               <KeyRound size={16} aria-hidden="true" />
               <span>
-                Submitting generates a 16-character super admin password. It is
-                shown once, on the next screen, and it is the only way to reset
-                this account if the password is lost.
+                This needs an internet connection: the account and the encryption
+                key are both created in the cloud. Submitting also issues a
+                recovery key, shown once on the next screen — it is the only way
+                back in, and the only way to reach the encrypted data, if the
+                password is lost.
               </span>
             </div>
 
@@ -386,75 +387,104 @@ const RegistrationPage = ({ onRegister }) => {
           <div className="flex flex-col gap-3">
             <div className="alert alert-success" role="status" aria-live="polite">
               <CheckCircle size={16} aria-hidden="true" />
-              <span>Registered. One thing left.</span>
+              <span>{adoptedExistingKey ? 'Registered.' : 'Registered. One thing left.'}</span>
             </div>
 
-            <section className="card p-5" aria-labelledby="super-heading">
+            <section className="card p-5" aria-labelledby="recovery-heading">
               <div className="flex items-start gap-3">
                 <span className="kpi-icon bg-[rgb(239_68_68/0.14)] text-destructive">
                   <ShieldAlert size={20} aria-hidden="true" />
                 </span>
                 <div className="min-w-0">
-                  <h2 id="super-heading" className="section-title">
-                    Super admin password
+                  <h2 id="recovery-heading" className="section-title">
+                    Recovery key
                   </h2>
                   <p className="page-subtitle mt-0.5">
-                    Shown once. Not stored anywhere you can read it back.
+                    {adoptedExistingKey
+                      ? 'Issued once already. This setup did not replace it.'
+                      : 'Shown once. Nothing keeps a copy you can read back.'}
                   </p>
                 </div>
               </div>
 
-              {/* Readable by default: it has to be copied down, and hiding a
-                  string nobody has memorised yet only invites a typo. */}
-              <div className="input-group mt-5">
-                <input
-                  id="super-admin-password"
-                  type={reveal.superAdmin ? 'text' : 'password'}
-                  value={superAdminPassword}
-                  readOnly
-                  aria-label="Super admin password"
-                  className="input pr-24 font-mono tracking-wider"
-                />
-                <span className="input-affix flex items-center gap-1">
-                  <RevealButton
-                    revealed={reveal.superAdmin}
-                    onClick={toggleReveal('superAdmin')}
-                    label="the super admin password"
+              {adoptedExistingKey ? (
+                <p className="mt-5 text-sm text-muted-foreground">
+                  This project already held an encryption key, so no new recovery
+                  key was issued. The key from the first setup is still the one
+                  that works, and still the only way to reach the encrypted data
+                  without the password. There is nothing new to write down.
+                </p>
+              ) : (
+                <>
+                  {/* A textarea, not an input: the key is sixty-four characters,
+                      and a single line would scroll most of it out of sight on
+                      the one screen where every character has to be transcribed
+                      exactly. Read-only rather than disabled, so it stays
+                      focusable and copyable from the keyboard. */}
+                  <textarea
+                    id="recovery-key"
+                    readOnly
+                    rows={2}
+                    value={reveal.recovery ? recoveryKey : maskKey(recoveryKey)}
+                    aria-label="Recovery key"
+                    aria-describedby="recovery-key-help"
+                    className="textarea mt-5 min-h-0 resize-none font-mono tracking-wider wrap-anywhere text-foreground"
                   />
-                  <button
-                    type="button"
-                    onClick={copyPassword}
-                    className="btn btn-ghost btn-sm btn-icon"
-                    aria-label="Copy the super admin password"
-                  >
-                    {copied ? (
-                      <Check size={15} className="text-accent" aria-hidden="true" />
-                    ) : (
-                      <Copy size={15} aria-hidden="true" />
-                    )}
-                  </button>
-                </span>
-              </div>
-              <p className="help-text" role="status" aria-live="polite">
-                {copied ? 'Copied to the clipboard.' : 'Copy it before you continue.'}
-              </p>
-              <hr className="divider my-5" />
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={copyRecoveryKey}
+                      className="btn btn-outline btn-sm"
+                    >
+                      {copied ? (
+                        <Check size={15} className="text-accent" aria-hidden="true" />
+                      ) : (
+                        <Copy size={15} aria-hidden="true" />
+                      )}
+                      Copy the key
+                    </button>
+                    <button
+                      type="button"
+                      onClick={toggleReveal('recovery')}
+                      className="btn btn-ghost btn-sm"
+                      aria-pressed={reveal.recovery}
+                      aria-controls="recovery-key"
+                    >
+                      {reveal.recovery ? (
+                        <EyeOff size={15} aria-hidden="true" />
+                      ) : (
+                        <Eye size={15} aria-hidden="true" />
+                      )}
+                      {reveal.recovery ? 'Hide it' : 'Show it'}
+                    </button>
+                    <p
+                      id="recovery-key-help"
+                      className="help-text mt-0"
+                      role="status"
+                      aria-live="polite"
+                    >
+                      {copied ? 'Copied to the clipboard.' : 'Copy it before you continue.'}
+                    </p>
+                  </div>
+                  <hr className="divider my-5" />
 
-              <h3 className="eyebrow">Where to keep it</h3>
-              <ul className="mt-2 flex flex-col gap-1.5 text-sm text-muted-foreground">
-                <li className="flex items-start gap-2">
-                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-warning" aria-hidden="true" />
-                  A password manager, alongside the admin password.
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-warning" aria-hidden="true" />
-                  Printed, in whatever the company treats as a safe.
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-warning" aria-hidden="true" />
-                  Not in a note beside the machine this runs on.
-                </li>
-              </ul>
+                  <h3 className="eyebrow">Where to keep it</h3>
+                  <ul className="mt-2 flex flex-col gap-1.5 text-sm text-muted-foreground">
+                    <li className="flex items-start gap-2">
+                      <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-warning" aria-hidden="true" />
+                      A password manager, alongside the admin password.
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-warning" aria-hidden="true" />
+                      Printed, in whatever the company treats as a safe.
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-warning" aria-hidden="true" />
+                      Not in a note beside the machine this runs on.
+                    </li>
+                  </ul>
+                </>
+              )}
 
               {error && (
                 <p className="error-text mt-4" role="alert">
@@ -467,21 +497,27 @@ const RegistrationPage = ({ onRegister }) => {
 
               {/* The original's button asserted "I have saved the password" on
                   the user's behalf. The claim is theirs to make. */}
-              <label htmlFor="acknowledged" className="flex items-start gap-2 text-sm">
-                <input
-                  id="acknowledged"
-                  type="checkbox"
-                  checked={acknowledged}
-                  onChange={(event) => setAcknowledged(event.target.checked)}
-                  className="checkbox mt-0.5"
-                />
-                <span>I have saved the super admin password somewhere safe.</span>
-              </label>
+              {!adoptedExistingKey && (
+                <label htmlFor="acknowledged" className="flex items-start gap-2 text-sm">
+                  <input
+                    id="acknowledged"
+                    type="checkbox"
+                    checked={acknowledged}
+                    onChange={(event) => setAcknowledged(event.target.checked)}
+                    className="checkbox mt-0.5"
+                  />
+                  <span>
+                    I have saved the recovery key somewhere safe. I understand it
+                    cannot be shown again, and that losing it along with the
+                    password means losing the encrypted data.
+                  </span>
+                </label>
+              )}
 
               <button
                 type="button"
                 onClick={() => navigate('/login')}
-                disabled={!acknowledged}
+                disabled={!adoptedExistingKey && !acknowledged}
                 className="btn btn-primary btn-lg mt-4 w-full"
               >
                 <LogIn size={17} aria-hidden="true" />

@@ -1,13 +1,43 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { LogOut, User, ChevronDown, Menu, UserCog } from 'lucide-react';
+import { LogOut, User, ChevronDown, Menu, UserCog, CloudOff } from 'lucide-react';
 import { useUser } from '../../contexts/UserContext';
-import { manilaDateLabel, manilaTime } from '../../utils/manila';
+import { formatUtcStoredDate, manilaDateLabel, manilaTime } from '../../utils/manila';
+
+/**
+ * The offline grace, if this session was unlocked from the cached credential
+ * rather than from Supabase. `LoginPage` writes it; nothing else does, and every
+ * sign-out clears it.
+ *
+ * Stored as the deadline rather than as a day count, so the count is derived at
+ * render time. A number written at sign-in would still read "7 days" a week
+ * later on a machine that was never closed.
+ */
+const readGrace = () => {
+  try {
+    const raw = localStorage.getItem('offlineGrace');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed?.expiresAt ? parsed : null;
+  } catch (error) {
+    console.warn('Could not read the offline grace:', error);
+    return null;
+  }
+};
+
+/** Whole days left, rounded up, floored at zero — the same arithmetic the backend uses. */
+const daysLeft = (expiresAt) => {
+  const deadline = Date.parse(expiresAt);
+  if (Number.isNaN(deadline)) return null;
+  const seconds = Math.floor((deadline - Date.now()) / 1000);
+  return seconds <= 0 ? 0 : Math.ceil(seconds / 86400);
+};
 
 const Header = ({ onLogout, onToggleSidebar }) => {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [companyName, setCompanyName] = useState('');
   const [adminName, setAdminName] = useState('');
   const [clock, setClock] = useState(() => manilaTime());
+  const [grace] = useState(readGrace);
   const menuButtonRef = useRef(null);
   const { user } = useUser();
 
@@ -60,6 +90,9 @@ const Header = ({ onLogout, onToggleSidebar }) => {
   }, [showUserMenu]);
 
   const displayName = adminName || user.displayName || 'Admin';
+  // Recomputed on every render, and the clock above re-renders once a second, so
+  // this needs no timer of its own to stay current.
+  const graceDays = grace ? daysLeft(grace.expiresAt) : null;
 
   return (
     <header className="glass z-30 flex h-16 shrink-0 items-center gap-4 border-x-0 border-t-0 px-4">
@@ -75,6 +108,28 @@ const Header = ({ onLogout, onToggleSidebar }) => {
       <h1 className="min-w-0 flex-1 truncate-1 font-display text-lg font-semibold" title={companyName}>
         {companyName}
       </h1>
+
+      {/* Shown at every width, unlike the clock beside it: an operator working
+          on a cached unlock needs to know it runs out, and on which day. */}
+      {graceDays !== null && (
+        <div
+          className="surface-muted flex shrink-0 items-center gap-2 px-3 py-1.5 text-warning"
+          role="status"
+          title={`Cached access expires ${formatUtcStoredDate(grace.expiresAt, {
+            month: 'short',
+            day: '2-digit',
+            hour: 'numeric',
+            minute: '2-digit'
+          })}. Sign in with a connection to renew it.`}
+        >
+          <CloudOff size={14} aria-hidden="true" />
+          <span className="text-xs font-medium">
+            {graceDays === 0
+              ? 'Offline · access expired'
+              : `Offline · ${graceDays} ${graceDays === 1 ? 'day' : 'days'} left`}
+          </span>
+        </div>
+      )}
 
       <div className="surface-muted hidden items-center gap-2 px-3 py-1.5 md:flex">
         <span className="text-xs text-muted-foreground">{manilaDateLabel()}</span>

@@ -1,7 +1,25 @@
 /**
- * Password reset, in two steps: prove the super admin password, then set a new
- * one. Both commands are unchanged — `verifySuperAdminPassword` gates step two,
- * `resetAdminPassword` does the write — and the reset still ends on `/login`.
+ * Password reset, in two steps: prove the recovery key issued at registration,
+ * then choose a new password. The IPC names are unchanged —
+ * `verifySuperAdminPassword` gates step two and `resetAdminPassword` finishes —
+ * but what they mean has: there is no second password any more, and no local
+ * hash to check either. Both commands read the wrapped key out of the cloud and
+ * prove possession by unwrapping it, which is why a wrong key and a corrupt one
+ * fail with different words.
+ *
+ * Two consequences this page has to be honest about.
+ *
+ * The key can only be checked where the wrapped copy can be reached: while
+ * signed in, or on a machine that has signed in before and still holds the
+ * cached copy. A device that has never signed in cannot recover here at all,
+ * and the backend says so rather than calling the key wrong.
+ *
+ * And passwords live in GoTrue now, which sets one only for a live session or
+ * through its own emailed link. This screen is reached signed out, so the link
+ * is the usual ending: the backend answers `success: false` with
+ * `recoveryKeyVerified: true` and `emailSent: true`, which is the flow working.
+ * Reporting that as a plain error — which is what happened before — announced
+ * the one path that works as the one that broke.
  *
  * The `onResetPassword` prop was passed by `App.jsx` and ignored; the page
  * called `window.api.resetAdminPassword` itself, so the wrapper's error
@@ -11,6 +29,7 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   AlertCircle,
+  AlertTriangle,
   ArrowLeft,
   CheckCircle,
   Eye,
@@ -20,6 +39,7 @@ import {
   LogIn,
   Lock,
   Mail,
+  MailCheck,
   ShieldAlert
 } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
@@ -49,8 +69,9 @@ const SuccessDialog = ({ onClose }) => {
             Password reset
           </h2>
           <p className="page-subtitle mt-1">
-            Sign in with the new password. The super admin password has not
-            changed, and it is still what a future reset asks for.
+            Sign in with the new password. Your recovery key is unchanged — the
+            data key is re-sealed under the new password and the escrow copy the
+            recovery key opens is left alone — so keep it for next time.
           </p>
           <button
             type="button"
@@ -72,16 +93,24 @@ const ForgotPasswordPage = ({ onResetPassword }) => {
 
   const [formData, setFormData] = useState({
     email: '',
-    super_admin_password: '',
+    recovery_key: '',
     new_password: '',
     confirm_password: ''
   });
-  const [reveal, setReveal] = useState({ superAdmin: false, next: false, confirm: false });
+  // No toggle for the recovery key, which is deliberate: it is sixty-four
+  // characters being copied off paper, and masking the one field that has to be
+  // transcribed exactly is how a typo becomes ten minutes of retrying. The two
+  // password fields keep theirs.
+  const [reveal, setReveal] = useState({ next: false, confirm: false });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [formErrors, setFormErrors] = useState({});
   const [step, setStep] = useState(1);
   const [showSuccess, setShowSuccess] = useState(false);
+  // Set when the key was accepted but the password could not be written here.
+  // `sent` separates "go and open the email" from "the key was right and nothing
+  // happened", which need different words and lead to different next steps.
+  const [emailNotice, setEmailNotice] = useState(null);
 
   const onField = (field) => (event) => {
     const { value } = event.target;
@@ -90,6 +119,7 @@ const ForgotPasswordPage = ({ onResetPassword }) => {
       setFormErrors((previous) => ({ ...previous, [field]: '' }));
     }
     if (error) setError('');
+    if (emailNotice) setEmailNotice(null);
   };
 
   const toggleReveal = (field) => () =>
@@ -100,8 +130,8 @@ const ForgotPasswordPage = ({ onResetPassword }) => {
     const errors = {};
     if (!formData.email.trim()) errors.email = 'Enter the registered email address.';
     else if (!EMAIL_PATTERN.test(formData.email)) errors.email = 'That is not a valid email address.';
-    if (!formData.super_admin_password) {
-      errors.super_admin_password = 'Enter the super admin password.';
+    if (!formData.recovery_key.trim()) {
+      errors.recovery_key = 'Enter the recovery key.';
     }
     setFormErrors(errors);
     if (Object.keys(errors).length > 0) return;
@@ -110,19 +140,26 @@ const ForgotPasswordPage = ({ onResetPassword }) => {
     setError('');
 
     try {
+      // Sent as typed. The backend canonicalises it — dashes, spaces and case
+      // are stripped, and the base32 look-alikes I/L/O are folded onto 1/1/0 —
+      // so a key read back off paper does not have to be perfect to work.
       const result = await window.api.verifySuperAdminPassword(
         formData.email,
-        formData.super_admin_password
+        formData.recovery_key
       );
 
       if (result.success) {
         setStep(2);
       } else {
-        setError(result.error || 'That email and super admin password did not match.');
+        // Rendered verbatim. The backend already distinguishes a key that does
+        // not unwrap from a wrapped key it could not reach on this device, and
+        // rewriting both into one sentence would lose the difference between
+        // "check what you typed" and "this device cannot do it".
+        setError(result.error || 'That email and recovery key did not match.');
       }
     } catch (verifyError) {
       console.error('Verification error:', verifyError);
-      setError('Something went wrong checking that password.');
+      setError('Something went wrong checking that recovery key.');
     } finally {
       setIsLoading(false);
     }
@@ -146,18 +183,28 @@ const ForgotPasswordPage = ({ onResetPassword }) => {
     setError('');
 
     try {
+      // The middle argument keeps the name `superAdminPassword` because that is
+      // what the Tauri command calls its parameter; what travels in it is the
+      // recovery key.
       const reset =
         onResetPassword ??
         ((email, superAdminPassword, newPassword) =>
           window.api.resetAdminPassword(email, superAdminPassword, newPassword));
       const result = await reset(
         formData.email,
-        formData.super_admin_password,
+        formData.recovery_key,
         formData.new_password
       );
 
       if (result.success) {
         setShowSuccess(true);
+      } else if (result.recoveryKeyVerified) {
+        // The key was right. GoTrue sets a password only for a live session or
+        // through its own link, and this screen is reached signed out, so the
+        // link is the normal ending — the password typed above is discarded and
+        // chosen again from the email. Showing this as an error, which is what
+        // used to happen, reported the working path as a broken one.
+        setEmailNotice({ sent: result.emailSent === true, message: result.error || '' });
       } else {
         setError(result.error || 'The password could not be reset.');
       }
@@ -171,15 +218,24 @@ const ForgotPasswordPage = ({ onResetPassword }) => {
 
   const finish = () => {
     setShowSuccess(false);
+    setEmailNotice(null);
     setFormData({
       email: '',
-      super_admin_password: '',
+      recovery_key: '',
       new_password: '',
       confirm_password: ''
     });
     setStep(1);
     navigate('/login');
   };
+
+  // Hoisted out of the JSX so the three views below read as three conditions
+  // instead of a ternary nested inside a ternary.
+  const linkSent = emailNotice?.sent === true;
+
+  let stepLabel = 'Verify';
+  if (linkSent) stepLabel = 'Emailed';
+  else if (step === 2) stepLabel = 'New password';
 
   return (
     <>
@@ -209,7 +265,7 @@ const ForgotPasswordPage = ({ onResetPassword }) => {
               <div className="min-w-0">
                 <h1 className="section-title text-lg">Reset the admin password</h1>
                 <p className="page-subtitle mt-0.5">
-                  Needs the super admin password issued at registration.
+                  Needs the recovery key issued at registration.
                 </p>
               </div>
             </div>
@@ -219,9 +275,7 @@ const ForgotPasswordPage = ({ onResetPassword }) => {
             <div className="mt-5">
               <div className="flex items-baseline justify-between">
                 <p className="eyebrow">Step {step} of 2</p>
-                <p className="text-sm text-muted-foreground">
-                  {step === 1 ? 'Verify' : 'New password'}
-                </p>
+                <p className="text-sm text-muted-foreground">{stepLabel}</p>
               </div>
               <div
                 className="progress mt-2"
@@ -234,7 +288,39 @@ const ForgotPasswordPage = ({ onResetPassword }) => {
                 <div className="progress-bar" style={{ width: step === 1 ? '50%' : '100%' }} />
               </div>
             </div>
-            {step === 1 ? (
+            {/* The usual ending, and a terminal one: the key was accepted and
+                the new password is now chosen from the emailed link, so the form
+                is replaced rather than left standing with fields that no longer
+                lead anywhere. */}
+            {linkSent && (
+              <div className="mt-5">
+                <div className="alert alert-success" role="status">
+                  <MailCheck size={16} aria-hidden="true" />
+                  <span className="wrap-anywhere">
+                    Recovery key accepted for <strong>{formData.email}</strong>
+                  </span>
+                </div>
+                <p className="mt-4 text-sm text-foreground">
+                  {emailNotice.message ||
+                    'A reset link has been emailed to you — open it to choose the new password.'}
+                </p>
+                <p className="help-text mt-3">
+                  <AlertCircle size={13} aria-hidden="true" />
+                  The link is the only place the new password can be set. Your
+                  recovery key still works afterwards — keep it.
+                </p>
+                <button
+                  type="button"
+                  onClick={finish}
+                  className="btn btn-primary btn-lg mt-5 w-full"
+                >
+                  <LogIn size={16} aria-hidden="true" />
+                  Go to sign in
+                </button>
+              </div>
+            )}
+
+            {!linkSent && step === 1 && (
               <form onSubmit={handleVerify} className="mt-5 flex flex-col gap-4">
                 <div>
                   <label htmlFor="email" className="label label-required">
@@ -263,52 +349,40 @@ const ForgotPasswordPage = ({ onResetPassword }) => {
                 </div>
 
                 <div>
-                  <label htmlFor="super-admin-password" className="label label-required">
-                    Super admin password
+                  <label htmlFor="recovery-key" className="label label-required">
+                    Recovery key
                   </label>
-                  <div className="input-group">
-                    <KeyRound size={15} className="input-icon" aria-hidden="true" />
-                    <input
-                      id="super-admin-password"
-                      type={reveal.superAdmin ? 'text' : 'password'}
-                      value={formData.super_admin_password}
-                      onChange={onField('super_admin_password')}
-                      className={`input pr-11 ${
-                        formErrors.super_admin_password ? 'input-invalid' : ''
-                      }`}
-                      placeholder="Issued at registration"
-                      autoComplete="off"
-                      aria-invalid={formErrors.super_admin_password ? 'true' : undefined}
-                      aria-describedby={
-                        formErrors.super_admin_password ? 'super-error' : 'super-help'
-                      }
-                    />
-                    <button
-                      type="button"
-                      onClick={toggleReveal('superAdmin')}
-                      className="input-affix btn btn-ghost btn-sm btn-icon"
-                      aria-pressed={reveal.superAdmin}
-                      aria-label={
-                        reveal.superAdmin
-                          ? 'Hide the super admin password'
-                          : 'Show the super admin password'
-                      }
-                    >
-                      {reveal.superAdmin ? (
-                        <EyeOff size={15} aria-hidden="true" />
-                      ) : (
-                        <Eye size={15} aria-hidden="true" />
-                      )}
-                    </button>
-                  </div>
-                  {formErrors.super_admin_password ? (
-                    <p id="super-error" className="error-text" role="alert">
+                  {/* A textarea, matching the one that handed the key over at
+                      registration: sixty-four characters do not fit a 40px
+                      single-line input, and this is the field where every
+                      character has to arrive intact. The icon and reveal affixes
+                      are gone with it — `.input-affix` is centred on a
+                      single-line control, and there is nothing to reveal. */}
+                  <textarea
+                    id="recovery-key"
+                    rows={2}
+                    value={formData.recovery_key}
+                    onChange={onField('recovery_key')}
+                    className={`textarea min-h-0 font-mono tracking-wider wrap-anywhere ${
+                      formErrors.recovery_key ? 'input-invalid' : ''
+                    }`}
+                    placeholder="XXXX-XXXX-XXXX-XXXX-…"
+                    autoComplete="off"
+                    spellCheck={false}
+                    autoCapitalize="characters"
+                    aria-invalid={formErrors.recovery_key ? 'true' : undefined}
+                    aria-describedby={formErrors.recovery_key ? 'recovery-error' : 'recovery-help'}
+                  />
+                  {formErrors.recovery_key ? (
+                    <p id="recovery-error" className="error-text" role="alert">
                       <AlertCircle size={13} aria-hidden="true" />
-                      {formErrors.super_admin_password}
+                      {formErrors.recovery_key}
                     </p>
                   ) : (
-                    <p id="super-help" className="help-text">
-                      Shown once during registration and not recoverable from here.
+                    <p id="recovery-help" className="help-text">
+                      <KeyRound size={13} aria-hidden="true" />
+                      Shown once at registration and not reissuable. Dashes, spaces
+                      and letter case do not matter.
                     </p>
                   )}
                 </div>
@@ -325,14 +399,38 @@ const ForgotPasswordPage = ({ onResetPassword }) => {
                   {isLoading ? 'Checking…' : 'Verify and continue'}
                 </button>
               </form>
-            ) : (
+            )}
+
+            {!linkSent && step === 2 && (
               <form onSubmit={handleReset} className="mt-5 flex flex-col gap-4">
                 <div className="alert alert-success" role="status">
                   <CheckCircle size={16} aria-hidden="true" />
                   <span className="wrap-anywhere">
-                    Verified for <strong>{formData.email}</strong>
+                    Recovery key accepted for <strong>{formData.email}</strong>
                   </span>
                 </div>
+
+                {/* Stated before the fields rather than after the attempt.
+                    Passwords are set in the cloud, and with no signed-in session
+                    — which is the normal state of a forgot-password screen — the
+                    cloud finishes the change through an emailed link and what is
+                    typed here is thrown away. */}
+                <p className="help-text">
+                  <AlertCircle size={13} aria-hidden="true" />
+                  If this app has no signed-in session, a reset link is emailed to
+                  you instead and the password below is discarded.
+                </p>
+
+                {emailNotice && !emailNotice.sent && (
+                  <div className="alert alert-warning" role="alert">
+                    <AlertTriangle size={16} aria-hidden="true" />
+                    <span>
+                      {emailNotice.message ||
+                        'The recovery key is correct, but the password could not be set and no reset email could be sent.'}{' '}
+                      Check the connection and try again.
+                    </span>
+                  </div>
+                )}
 
                 <div>
                   <label htmlFor="new-password" className="label label-required">
@@ -451,8 +549,9 @@ const ForgotPasswordPage = ({ onResetPassword }) => {
 
             <p className="help-text">
               <AlertCircle size={13} aria-hidden="true" />
-              The super admin password is not changed by a reset, and it cannot be
-              recovered here — without it there is no way back into the account.
+              A reset leaves the recovery key as it was, and the key cannot be
+              reissued. Lose it along with the password and the encrypted data
+              goes with them — nobody, including this app, can open it again.
             </p>
           </div>
 

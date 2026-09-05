@@ -124,12 +124,6 @@ impl Supabase {
         self.read_session()
     }
 
-    /// Forget the session, so subsequent calls fall back to the anon key — which
-    /// under the deployed RLS can read nothing at all.
-    pub fn clear_session(&self) {
-        self.store_session(None);
-    }
-
     /// The bearer token PostgREST should see: the signed-in user's if there is
     /// one, otherwise the anon key (which is what supabase-js sends).
     fn bearer(&self) -> String {
@@ -360,6 +354,38 @@ impl Supabase {
         parse(
             self.request(reqwest::Method::POST, "/auth/v1/recover")
                 .json(&json!({ "email": email }))
+                .send()
+                .await?,
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Take the session out of this client, returning what was there.
+    ///
+    /// Signing out has two halves that must not share a failure mode: forgetting
+    /// the token here, which cannot fail, and revoking it at GoTrue, which needs
+    /// the network. This is the first half, and it hands the caller what the
+    /// second half needs.
+    pub fn take_session(&self) -> Option<Session> {
+        let session = self.read_session();
+        self.store_session(None);
+        session
+    }
+
+    /// `supabase.auth.signOut()` — revoke one refresh token, by its own access
+    /// token rather than by whatever this client currently holds, because
+    /// `take_session` has already cleared that.
+    pub async fn revoke(&self, access_token: &str) -> ApiResult<()> {
+        parse(
+            self.http
+                .request(
+                    reqwest::Method::POST,
+                    format!("{}/auth/v1/logout", self.url),
+                )
+                .header("apikey", &self.anon_key)
+                .header("Authorization", format!("Bearer {access_token}"))
+                .json(&json!({}))
                 .send()
                 .await?,
         )

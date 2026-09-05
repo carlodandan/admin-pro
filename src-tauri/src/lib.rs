@@ -62,6 +62,7 @@ pub fn run() {
             // Authentication
             commands::auth::change_password,
             commands::auth::login_user,
+            commands::auth::logout_user,
             commands::auth::reset_admin_password,
             commands::auth::verify_super_admin_password,
             // Attendance

@@ -2,29 +2,29 @@
 //!
 //! Credentials are cloud-only, which on its own would mean the app cannot open
 //! without a connection. To keep it usable on a flaky link, a successful cloud
-//! login writes the unlocked data key, the two wrapped blobs and an absolute
-//! expiry into the platform credential store; a later start with no connection
-//! unlocks from that instead.
+//! login writes the two wrapped copies of the data key and an absolute expiry
+//! into the platform credential store; a later start with no connection unwraps
+//! the cached blob with the password it is given, instead of asking the cloud.
 //!
-//! Two properties matter here:
+//! Three properties matter here:
 //!
+//! * The cache holds no unwrapped key. It is the same `salt || nonce || ct+tag`
+//!   blob `app_keyring` holds, so the password is still required — reading the
+//!   entry off the machine buys an attacker an Argon2id attack, not the key.
 //! * The expiry is absolute and set at login, so the grace cannot be extended by
 //!   simply staying offline.
 //! * `last_seen` only ever moves forward. Winding the system clock back to make
 //!   an expired cache look fresh trips that check and the cache is discarded, so
 //!   the grace cannot be extended by lying about the time either.
 //!
-//! The wrapped blobs are cached alongside the key so recovery by super-admin key
-//! also works offline. Nothing here is a credential in its own right: the entry
-//! is scoped to the Windows user account, and deleting it only forces the next
-//! start to go online.
+//! Both blobs are cached, not just the password one, so recovery by super-admin
+//! key also works offline. The entry is scoped to the Windows user account, and
+//! deleting it only forces the next start to go online.
 
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
-use zeroize::Zeroizing;
 
-use crate::crypto::{Dek, KEY_LEN};
-use crate::error::{fail, AppError, Result};
+use crate::error::Result;
 
 /// Shown in the Credential Manager UI as `AdminPro/session`.
 const SERVICE: &str = "AdminPro";
@@ -41,10 +41,8 @@ const ROLLBACK_TOLERANCE_MINUTES: i64 = 60;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CachedSession {
     pub email: String,
-    /// The unlocked data key, hex-encoded. The Credential Manager encrypts this
-    /// at rest under the Windows user's own key material.
-    dek: String,
-    /// Base64, exactly as `app_keyring` holds them, so recovery works offline.
+    /// Base64, exactly as `app_keyring` holds them, so an offline sign-in runs
+    /// the same unwrap as an online one and recovery works offline too.
     pub wrapped_by_password: String,
     pub wrapped_by_recovery: String,
     /// Unix seconds. Set at login, never extended by a read.
@@ -69,36 +67,18 @@ impl CachedSession {
             .map(|stamp| stamp.to_rfc3339())
             .unwrap_or_default()
     }
-
-    /// The cached data key.
-    pub fn dek(&self) -> Result<Dek> {
-        let bytes = hex::decode(&self.dek)
-            .map_err(|error| AppError::Message(format!("cached key is malformed: {error}")))?;
-        if bytes.len() != KEY_LEN {
-            return fail("cached key is the wrong length");
-        }
-        let mut key = Zeroizing::new([0u8; KEY_LEN]);
-        key.copy_from_slice(&bytes);
-        Ok(key)
-    }
 }
 
 fn entry() -> Result<keyring::Entry> {
     keyring::Entry::new(SERVICE, ACCOUNT).map_err(Into::into)
 }
 
-/// Cache an unlocked session. Called only after the cloud has authenticated the
-/// admin, so this never creates access that the cloud has not already granted.
-pub fn store(
-    email: &str,
-    dek: &Dek,
-    wrapped_by_password: &str,
-    wrapped_by_recovery: &str,
-) -> Result<()> {
+/// Cache a session. Called only after the cloud has authenticated the admin, so
+/// this never creates access that the cloud has not already granted.
+pub fn store(email: &str, wrapped_by_password: &str, wrapped_by_recovery: &str) -> Result<()> {
     let now = Utc::now();
     let session = CachedSession {
         email: email.to_string(),
-        dek: hex::encode(dek.as_slice()),
         wrapped_by_password: wrapped_by_password.to_string(),
         wrapped_by_recovery: wrapped_by_recovery.to_string(),
         expires_at: (now + Duration::days(GRACE_DAYS)).timestamp(),

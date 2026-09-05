@@ -263,7 +263,7 @@ pub fn derive_index_key(dek: &Dek) -> Zeroizing<[u8; KEY_LEN]> {
 /// Trimming and lower-casing make the index match the case-insensitive equality
 /// the plaintext UNIQUE constraint used to imply for email addresses.
 pub fn blind_index(index_key: &[u8; KEY_LEN], value: &str) -> String {
-    let mut mac = <Hmac<Sha256>>::new_from_slice(index_key)
+    let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(index_key)
         .expect("HMAC accepts a key of any length");
     mac.update(value.trim().to_lowercase().as_bytes());
     hex::encode(mac.finalize().into_bytes())

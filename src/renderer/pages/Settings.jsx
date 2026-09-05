@@ -29,6 +29,7 @@ import {
   Palette,
   Phone,
   Save,
+  ShieldCheck,
   User
 } from 'lucide-react';
 import { formatUtcStoredDate } from '../utils/manila';
@@ -283,8 +284,22 @@ const Settings = () => {
 
   /**
    * "Update Password" had no `onClick` in the original — the three fields went
-   * nowhere. `changePassword` verifies the current one against the stored hash
-   * before writing, which is why it is asked for.
+   * nowhere.
+   *
+   * There is no stored hash behind this any more. The current password is proven
+   * by using it: the backend unwraps the cloud keyring with it, re-seals the data
+   * key under the new one, and only then moves the account onto it. That is why
+   * it is still asked for — GoTrue's own password update does not require it, so
+   * without this a session left open on someone's desk could re-seal the key
+   * under a password the owner does not know.
+   *
+   * Two consequences. It needs a connection and a live session, so it can fail
+   * for reasons that have nothing to do with what was typed. And it can stop
+   * between the two writes, leaving the key sealed under the new password while
+   * the account still answers to the old one, which is recoverable but only if
+   * the user is told exactly that. `result.error` carries the backend's own
+   * wording for both, so it is surfaced as it comes rather than flattened into
+   * "the password could not be changed".
    */
   const changePassword = async (event) => {
     event.preventDefault();
@@ -604,8 +619,9 @@ const Settings = () => {
                     Change password
                   </h2>
                   <p className="page-subtitle mt-0.5">
-                    The current password is checked against the stored hash before
-                    the new one is written.
+                    Passwords live in the cloud, so this needs a connection. The
+                    current one is asked for because the encryption key is
+                    re-sealed under the new one.
                   </p>
 
                   <form onSubmit={changePassword} className="mt-5">
@@ -753,6 +769,15 @@ const Settings = () => {
                     <Clock size={13} aria-hidden="true" />
                     Signed out after one hour of a session, and always when the app
                     starts again.
+                  </p>
+                  {/* Recovery is not an action on this page, and saying so is the
+                      point: there is nothing here that can reissue the key or
+                      reset the password without it. */}
+                  <p className="help-text mt-2">
+                    <ShieldCheck size={13} aria-hidden="true" />
+                    Forgotten the password? The recovery key issued at registration
+                    is the way back in, from the sign-in screen. It cannot be shown
+                    again or reissued from here.
                   </p>
                 </section>
               </>
