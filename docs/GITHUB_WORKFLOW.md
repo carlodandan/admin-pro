@@ -1,13 +1,18 @@
 # Building and releasing in CI
 
 > What [`.github/workflows/build.yml`](../.github/workflows/build.yml) does, the two secrets it
-> needs, and why each step is there.
+> needs, and what it deliberately leaves out.
 
-The workflow builds the Windows installer on a GitHub-hosted Windows runner and attaches it to
-a GitHub release. It is **manual only** — `workflow_dispatch`, no `push` or `pull_request`
-trigger — because the build inlines your Supabase project URL and anon key into the installer.
-That should be a deliberate act tied to a specific commit, not something that fires on every
-commit to `main`.
+The workflow builds the Windows installer on a GitHub-hosted Windows runner and attaches it to a
+GitHub release. It is **manual only** — `workflow_dispatch`, no `push` or `pull_request` trigger
+— because the build inlines your Supabase project URL and anon key into the installer. That
+should be a deliberate act tied to a specific commit, not something that fires on every commit
+to `main`.
+
+It is also deliberately small: five steps, four of which are off-the-shelf actions.
+[`tauri-apps/tauri-action`](https://github.com/tauri-apps/tauri-action) does the build, creates
+the release and uploads the installer, so there is no hand-written packaging, metadata or upload
+logic to keep in sync with the project.
 
 ---
 
@@ -16,10 +21,9 @@ commit to `main`.
 1. [What the workflow produces](#1-what-the-workflow-produces)
 2. [Repository secrets](#2-repository-secrets)
 3. [Running the workflow](#3-running-the-workflow)
-4. [What each step is for](#4-what-each-step-is-for)
+4. [The five steps](#4-the-five-steps)
 5. [What is deliberately absent](#5-what-is-deliberately-absent)
-6. [Keeping the pins aligned](#6-keeping-the-pins-aligned)
-7. [Troubleshooting](#7-troubleshooting)
+6. [Troubleshooting](#6-troubleshooting)
 
 ---
 
@@ -28,15 +32,21 @@ commit to `main`.
 | Output | Path / location | Retention |
 |---|---|---|
 | NSIS installer | `src-tauri/target/release/bundle/nsis/Admin Pro_<version>_x64-setup.exe` | — |
-| Build artifact | Actions run → *Artifacts* → `admin-pro-<version>-<commit>-nsis` | 14 days |
-| GitHub release | Tag `ap-<short-commit>`, titled `Admin Pro <version> — Windows x64 (<date>)` | Permanent until deleted |
+| Workflow artifact | Actions run → *Artifacts* | 90 days (repository default) |
+| GitHub release | Tag `v<version>`, titled `Admin Pro v<version>` | Permanent until deleted |
 
-The artifact is uploaded even on a release run. A release can be deleted or replaced; the
-artifact is what you debug a failed install against.
+The artifact is uploaded alongside the release (`uploadWorkflowArtifacts: true`). A release can
+be deleted or replaced; the artifact is what you debug a failed install against.
 
-The version comes from `src-tauri/tauri.conf.json`, not `package.json` — that file is what
-names the installer, so reading anything else would let the release title drift from the file
-attached to it.
+**The version comes from `src-tauri/tauri.conf.json`.** `tauri-action` reads it there and
+substitutes it for `__VERSION__` in the tag, the release name and the release body — so the
+title can never drift from the file attached to it. It is currently `1.0.0`, giving tag `v1.0.0`.
+
+> [!IMPORTANT]
+> Because the tag is derived from the version rather than the commit, **rerunning the workflow
+> without bumping `version` updates the existing release in place** — same tag, new installer,
+> and the name and body are refreshed. Bump the version in `src-tauri/tauri.conf.json` when you
+> want a distinct release.
 
 ---
 
@@ -56,6 +66,12 @@ Two secrets are required. Both are the same values you put in `.env` locally.
 3. **New repository secret**, once per value. Names must match exactly — GitHub does not warn
    about a typo, the value simply arrives empty.
 
+> [!WARNING]
+> An empty `VITE_SUPABASE_*` produces an installer that builds perfectly and then cannot reach
+> Supabase at all, and there is no runtime configuration file to correct afterwards. Nothing in
+> the workflow checks for this, so confirm both secrets exist before you run it — the failure
+> otherwise surfaces at a user's first launch rather than in CI.
+
 ### They are inlined, and that is accounted for
 
 Vite substitutes `import.meta.env.VITE_*` at build time and the Rust core compiles the same two
@@ -69,159 +85,132 @@ filtered result set. The full reasoning is in
 [`SECURITY.md § The anon key authorizes nothing`](SECURITY.md#the-anon-key-authorizes-nothing).
 
 > [!CAUTION]
-> Never add a `service_role` or secret key as a repository secret for this workflow. It
-> bypasses RLS entirely, and unlike the anon key it *would* be a real credential compiled into
-> every installer you ship.
-
-The workflow validates both secrets in a dedicated early step rather than letting an empty
-value through. An empty `VITE_SUPABASE_*` produces an installer that builds perfectly and then
-cannot reach Supabase at all — a failure that surfaces at a user's first launch instead of in
-CI. The check fails in seconds, and it tests the values without printing them.
+> Never add a `service_role` or secret key as a repository secret for this workflow. It bypasses
+> RLS entirely, and unlike the anon key it *would* be a real credential compiled into every
+> installer you ship.
 
 ---
 
 ## 3. Running the workflow
 
-**Actions** → **Build Admin Pro** → **Run workflow**. Pick the branch or tag to build.
+**Actions** → **Build Admin Pro** → **Run workflow**. Pick the branch or tag to build. There are
+no inputs.
 
-| Input | Default | Effect |
-|---|---|---|
-| `run_checks` | `true` | Run ESLint, Clippy (`-D warnings`) and `cargo test` before building. |
-| `draft` | `false` | Create the release as a draft instead of publishing it. |
+The job declares `permissions: contents: write` so `tauri-action` can create the release, and
+uses the automatic `GITHUB_TOKEN`. No personal access token is involved.
 
-Turn `run_checks` off only to iterate on a packaging problem you have already isolated —
-never for a build you intend to release. Use `draft` when you want to review the release notes
-and the attached installer before anyone can download them.
-
-The job needs `permissions: contents: write` to create the release; that is declared in the
-workflow and uses the automatic `GITHUB_TOKEN`. No personal access token is involved.
+To publish as a draft instead, set `releaseDraft: true` in the workflow. Note that `tauri-action`
+v1 **fails** if `releaseDraft: true` is set and the release it finds for that tag is not a draft
+— the flag has to match.
 
 ---
 
-## 4. What each step is for
+## 4. The five steps
 
-The job runs on `windows-2025`. Windows is not a preference: the bundle target is NSIS and the
-offline credential cache uses the Windows Credential Manager, so a Linux runner cannot produce
-a usable build of this application.
+| # | Step | Action | What it does |
+|---|---|---|---|
+| 1 | Checkout code | `actions/checkout@v7` | Clones the commit you selected. |
+| 2 | Setup pnpm and Node | `pnpm/setup@v2` | Installs pnpm 11 and Node 24, caches the pnpm store, **and runs `pnpm install --frozen-lockfile`**. |
+| 3 | Setup Rust | `dtolnay/rust-toolchain@stable` | Installs a stable Rust toolchain. This is a Tauri application — the backend is Rust and there is no prebuilt native module to download. |
+| 4 | Cache Rust build | `Swatinem/rust-cache@v2` | Caches `src-tauri/target`. A cold build of the dependency tree takes several minutes. |
+| 5 | Build and publish | `tauri-apps/tauri-action@v1` | Everything else: frontend build, release binary, NSIS installer, release creation, asset upload. |
 
-| # | Step | Why it is there |
-|---|---|---|
-| 1 | `actions/checkout@v4` | — |
-| 2 | **Check required secrets** | Fails in seconds if either `VITE_SUPABASE_*` is empty, instead of after a full Rust build. Uses `::error::` annotations and never echoes the values. |
-| 3 | `pnpm/action-setup@v4` | Installs pnpm at the pinned version. Must come *before* `setup-node`, or `cache: pnpm` has no package manager to find. |
-| 4 | `actions/setup-node@v4` | Node at the pinned version, with the pnpm store cached. |
-| 5 | `dtolnay/rust-toolchain@stable` | **Required.** This is a Tauri application: the backend is Rust and there is no prebuilt native module to download. Without a toolchain the build dies at the first `cargo` invocation. `components: clippy` is requested here so the Clippy step needs no second install. |
-| 6 | `Swatinem/rust-cache@v2` | A cold build of the dependency tree — including bundled SQLite and `aws-lc`/`ring` for rustls — takes several minutes. Keyed on `Cargo.lock`, scoped with `workspaces: src-tauri -> target` because the crate is not at the repository root. |
-| 7 | `pnpm install --frozen-lockfile` | Fails if `pnpm-lock.yaml` disagrees with `package.json`, rather than silently resolving something different from what was tested. |
-| 8 | `pnpm run lint` | ESLint over `src/renderer`. Gated on `run_checks`. |
-| 9 | `cargo clippy --all-targets -- -D warnings` | Clippy is clean on this tree, so warnings are errors to keep it that way. `--all-targets` covers the test targets too. Gated on `run_checks`. |
-| 10 | `cargo test` | The crypto module: wrap/unwrap round-trips, idempotent field encryption, blind-index determinism, recovery-key canonicalisation. Gated on `run_checks`. |
-| 11 | `pnpm run make` | `tauri build`. This runs `pnpm run build` (Vite → `dist/`) itself via `beforeBuildCommand`, then compiles the release binary and produces the NSIS installer. The two `VITE_*` secrets are supplied here — this is the only step that needs them. |
-| 12 | **Collect release metadata** | Reads the version, date, commit and dependency versions into `$GITHUB_ENV` for the release body. |
-| 13 | `actions/upload-artifact@v4` | The installer, with `if-no-files-found: error` so a silent packaging failure cannot pass as success. |
-| 14 | `softprops/action-gh-release@v2` | Creates tag `ap-<short-commit>` and attaches the installer. `fail_on_unmatched_files: true` for the same reason. |
+### Why there is no separate install step
 
-### Why the metadata step reads two different files
+`pnpm/setup@v2` runs the install itself — its `install` input defaults to `true`, and without an
+explicit `require-lockfile` it installs with `--frozen-lockfile`. `version: 11` and
+`runtime: node@24` track the local environment; update them here when you upgrade locally. Note
+that v2 of that action requires pnpm 11 or newer.
 
-Frontend versions come from `package.json` — they are requirements (`^19.2.3`) and that is
-honest for a release note. Rust versions come from `src-tauri/Cargo.lock` via a small
-`crate_version()` helper, because `Cargo.toml` only says `"2"` for Tauri and `"0.32"` for
-rusqlite; the lockfile records what was actually compiled. `rustc --version` reports the
-toolchain the runner resolved, and `MSRV` is read from `rust-version` in `Cargo.toml` so the
-release states the floor as well as the version used.
+The Rust toolchain is intentionally *not* pinned (`@stable`). `rust-version = "1.88"` in
+`src-tauri/Cargo.toml` is the real floor, and a newer stable compiler is expected to work.
 
-> [!NOTE]
-> If you are looking at this file from an older checkout: the previous version of this workflow
-> read `.devDependencies.electron`, `.dependencies.better-sqlite3` and `.Dependencies.react`
-> (capital *D* — a `jq` path that never matched anything), and uploaded from
-> `out/make/squirrel.windows/x64/*`. All four are gone. None of those paths exist in a Tauri
-> build, and the release body referenced a `BETTER_SQLITE3_VER` variable that was never set.
+### What step 5 does internally
+
+`tauri build` runs `beforeBuildCommand` from `src-tauri/tauri.conf.json`, which is
+`pnpm run build` — Vite compiles the React frontend to `dist/`. Cargo then compiles the release
+binary and the NSIS bundler wraps both into the per-user installer. `tauri-action` finds the
+resulting bundle, creates or updates the release for `v<version>`, and uploads it.
 
 ---
 
 ## 5. What is deliberately absent
 
+**No lint, clippy or test gate.** The workflow builds and publishes; it does not verify. Run the
+gates locally before triggering it:
+
+```bash
+pnpm lint
+cd src-tauri && cargo clippy --all-targets && cargo test
+```
+
+That is a real trade-off — a red tree can be released. It is the price of a five-step workflow,
+and it is reversible: adding those three steps back is mechanical.
+
 **No code-signing or updater secrets.** `src-tauri/tauri.conf.json` configures no updater and
-carries no `pubkey`, so `tauri build` never asks for a signing key. The `signkey/` directory
-holds an unused local key pair (`*.sample` templates are committed; the real keys are in
-`.gitignore`). If you later enable the Tauri updater, that is when `TAURI_SIGNING_PRIVATE_KEY`
-and its password become required secrets — and shipping an update feed is a larger decision
-than adding two secrets.
+carries no `pubkey`, so `tauri build` never asks for a signing key, and `uploadUpdaterJson` is
+set to `false` — left at its default `true`, the release would receive a `latest.json` listing no
+platforms. The `signkey/` directory holds an unused local key pair (`*.sample` templates are
+committed; the real keys are in `.gitignore`). If you enable the Tauri updater, that is when
+`uploadUpdaterJson: true`, `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
+all become necessary together.
+
+**No icon generation step.** `src-tauri/icons/` is committed and complete, including `icon.ico`
+and `icon.icns`. `pnpm tauri icon <source.png>` is a one-off you run locally when the logo
+changes, not something a release build should redo.
 
 **No macOS or Linux job.** Both would need a different bundle target and a keychain backend for
 the offline cache. See the [Tauri distribution guide](https://v2.tauri.app/distribute/).
 
 **No `push` trigger.** See the note at the top of this document.
 
-**No `pull_request` trigger.** Secrets are not passed to workflows triggered from a fork, so a
-PR build would fail the secrets check by design rather than by accident. Run `pnpm lint` and
-`cargo clippy --all-targets` locally instead — they are the same two gates the workflow runs.
+**No `pull_request` trigger.** Secrets are not passed to workflows triggered from a fork, so a PR
+build would silently produce an installer that cannot reach Supabase.
 
 ---
 
-## 6. Keeping the pins aligned
+## 6. Troubleshooting
 
-The workflow pins the Node and pnpm versions in the job's `env` block:
+### The release was updated instead of created
 
-```yaml
-env:
-  NODE_VERSION: "24.16.0"
-  PNPM_VERSION: "11.21.0"
-```
-
-These track the local development environment. When you upgrade locally, update them here in
-the same commit — `node --version` and `pnpm --version` are the source. The Rust toolchain is
-intentionally *not* pinned (`@stable`): `rust-version = "1.88"` in `Cargo.toml` is the real
-floor, and a newer stable compiler is expected to work.
-
----
-
-## 7. Troubleshooting
-
-### `VITE_SUPABASE_URL is not set`
-
-The secrets check did its job. Add the secret under **Settings → Secrets and variables →
-Actions**, then re-run. Names are case-sensitive and must match exactly. If you *updated* a
-secret, re-run the workflow — an in-flight run keeps the values it started with.
-
-### `error: linker link.exe not found` or an MSVC error
-
-The runner image changed and no longer carries the C++ build tools. `windows-2025` includes
-them today; if that changes, add `ilammy/msvc-dev-cmd@v1` before the Rust step.
-
-### `cargo` is not recognised
-
-The Rust toolchain step was removed or failed. It is not optional — see step 5 above.
-
-### The build takes 15+ minutes
-
-The Rust cache missed. It is keyed on `Cargo.lock`, so any dependency change pays for a full
-rebuild once. Repeated cold builds with an unchanged lockfile mean the cache is being evicted
-(GitHub's 10 GB per-repository limit) — check **Actions → Caches**.
-
-### `if-no-files-found: error` fired, but the build reported success
-
-`tauri build` succeeded but produced no NSIS installer. Check the build log for the bundling
-phase specifically; `tauri.conf.json` must have `bundle.active: true` and `nsis` in
-`bundle.targets`. A missing icon listed in `bundle.icon` fails bundling while the binary itself
-compiles cleanly.
+Expected when the version has not changed — see the note in
+[section 1](#1-what-the-workflow-produces). Bump `version` in `src-tauri/tauri.conf.json`.
 
 ### `Resource not accessible by integration` on the release step
 
-`permissions: contents: write` is missing from the job, or the repository restricts
-`GITHUB_TOKEN` to read-only under **Settings → Actions → General → Workflow permissions**.
+`permissions: contents: write` is missing from the job, or the repository is configured with
+read-only workflow permissions (**Settings → Actions → General → Workflow permissions**).
 
-### The release exists but the tag is wrong
+### The build fails with a draft mismatch
 
-`tag_name` is `ap-<short-commit>` of the commit that was built. Re-running the workflow on the
-same commit will try to reuse that tag. Delete the old release and tag first, or build a new
-commit.
+`releaseDraft: true` is set but the release for that tag already exists and is published.
+`tauri-action` v1 fails rather than converting it. Delete the release, or align the flag.
+
+### `pnpm/setup` fails on the pnpm version
+
+v2 of that action fetches a native per-platform pnpm binary and requires **pnpm 11 or newer**.
+Anything older needs `pnpm/action-setup` instead.
+
+### The build takes 15+ minutes
+
+The Rust cache missed. `Cargo.lock` changed, the cache expired, or the `Swatinem/rust-cache@v2`
+step was removed. A cold dependency-tree build is genuinely that slow; later runs are not.
+
+### `error: linker link.exe not found` or an MSVC error
+
+The MSVC toolchain is preinstalled on the `windows-2025` image. If you changed `runs-on`, that is
+the cause.
 
 ### The installer builds, but the app cannot reach Supabase
 
-The `VITE_*` values were empty or wrong at build time. There is no runtime configuration file to
-correct afterwards — rebuild. Confirm the project schema is applied too; see
-[`SUPABASE_SETUP.md § 10`](SUPABASE_SETUP.md#10-troubleshooting).
+The `VITE_*` secrets were empty at build time. Confirm both exist under **Settings → Secrets and
+variables → Actions**, then rerun — the values are compiled in, so there is nothing to fix
+post-install. See [`SUPABASE_SETUP.md`](SUPABASE_SETUP.md).
+
+### `latest.json` appeared on the release
+
+`uploadUpdaterJson` was set back to `true` without an updater configured. With no signed updater
+bundles the generated file lists no platforms and is meaningless.
 
 ---
 
@@ -230,7 +219,7 @@ correct afterwards — rebuild. Confirm the project schema is applied too; see
 | ✅ Do | ❌ Don't |
 |---|---|
 | Keep `.env` out of the repository (it is already in `.gitignore`). | Commit `.env`, or paste real values into this file. |
-| Test for presence, as the workflow's secrets step does. | `echo` a secret to the log — GitHub masks known values, but only exactly-matching ones. |
+| Confirm both secrets exist before triggering a release build. | `echo` a secret to the log — GitHub masks known values, but only exactly-matching ones. |
 | Rotate the anon key if you rotate the project's keys, and rebuild. | Add a `service_role` key as a repository secret. |
 | Treat everything in the installer as public. | Assume compiling a value in hides it. |
 
@@ -238,6 +227,8 @@ correct afterwards — rebuild. Confirm the project schema is applied too; see
 
 ## Further reading
 
+- [`tauri-apps/tauri-action`](https://github.com/tauri-apps/tauri-action) — every input the build step accepts
+- [`pnpm/setup`](https://github.com/pnpm/setup) — pnpm and a JavaScript runtime in one step
 - [Using secrets in GitHub Actions](https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions)
 - [Tauri: distributing your app](https://v2.tauri.app/distribute/)
 - [`SUPABASE_SETUP.md`](SUPABASE_SETUP.md) — the schema the installer expects to already exist

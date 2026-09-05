@@ -213,8 +213,15 @@ to test the binary without producing an installer.
 ## Building in CI
 
 `.github/workflows/build.yml` builds the installer on a Windows runner and attaches it to a
-GitHub release. Add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` as repository secrets,
-then run the workflow from **Actions → Build Admin Pro → Run workflow**.
+GitHub release, using [`tauri-apps/tauri-action`](https://github.com/tauri-apps/tauri-action).
+Add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` as repository secrets, then run the
+workflow from **Actions → Build Admin Pro → Run workflow**. It is manual only — the build
+inlines both values into the installer.
+
+The release is tagged `v<version>` from `src-tauri/tauri.conf.json`, so bump that version
+before a release you want to keep separate; rerunning at the same version updates the existing
+release in place. The workflow does not run the lint or test gates — run `pnpm lint` and
+`cargo clippy --all-targets` locally first.
 
 Setup and the rationale behind each step are in
 [`docs/GITHUB_WORKFLOW.md`](docs/GITHUB_WORKFLOW.md).
