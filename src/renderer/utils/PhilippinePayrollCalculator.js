@@ -387,8 +387,12 @@ class PhilippinePayrollCalculator {
       sss: {
         employee: (firstHalfData.deductions.mandatory.sss.employee + secondHalfData.deductions.mandatory.sss.employee) * 2,
         employer: (firstHalfData.deductions.mandatory.sss.employer + secondHalfData.deductions.mandatory.sss.employer) * 2,
-        total: (firstHalfData.deductions.mandatory.sss.employee + secondHalfData.deductions.mandatory.sss.employer +
-          secondHalfData.deductions.mandatory.sss.employee + secondHalfData.deductions.mandatory.sss.employer)
+        // Was spelled out as employee + employer per half, but read the
+        // *second* half's employer share for the first half and dropped the
+        // `* 2` the two siblings below apply. `.sss.total` is already
+        // employee + employer (`calculateHalfMonthPayroll`), so this now
+        // matches philhealth and pagibig exactly.
+        total: (firstHalfData.deductions.mandatory.sss.total + secondHalfData.deductions.mandatory.sss.total) * 2
       },
       philhealth: {
         employee: (firstHalfData.deductions.mandatory.philhealth.employee + secondHalfData.deductions.mandatory.philhealth.employee) * 2,

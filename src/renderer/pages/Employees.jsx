@@ -1,24 +1,85 @@
-import React, { useState, useEffect } from 'react';
-import { Plus, Filter, Download, Search, MoreVertical, Eye, Edit, Mail, Phone, UserPlus, Users, Calendar, CreditCard, Loader2 } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import {
+  AlertTriangle,
+  Building2,
+  CalendarOff,
+  CheckCircle,
+  Download,
+  Mail,
+  PhilippinePeso,
+  Phone,
+  Search,
+  UserPlus,
+  Users,
+  X
+} from 'lucide-react';
 import AddEmployee from '../components/Employees/AddEmployee';
-import DeleteEmployee from '../components/Employees/DeleteEmployee'; // Import the new component
+import DeleteEmployee from '../components/Employees/DeleteEmployee';
+import { downloadCsv, toCsv } from '../utils/csv';
+import { formatStoredDate, manilaDate } from '../utils/manila';
+
+const STATUSES = ['All', 'Active', 'Inactive', 'On Leave'];
+
+/** Status is the one thing here colour carries — and it carries a word too. */
+const STATUS_BADGE = {
+  Active: 'badge-accent',
+  Inactive: 'badge-danger',
+  'On Leave': 'badge-warning'
+};
+
+const formatCurrency = (amount) =>
+  new Intl.NumberFormat('en-PH', {
+    style: 'currency',
+    currency: 'PHP',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0
+  }).format(amount || 0);
+
+/**
+ * A database row as the table wants it.
+ *
+ * The department colour map that used to live here gave seven hard-coded
+ * department names a `bg-blue-100`-through-`bg-pink-100` fill — light-theme
+ * tints on a dark surface, and nothing at all for an eighth department. The
+ * chip is one neutral token now: a department is a category, not a state, so
+ * that colour was not carrying meaning.
+ */
+const toRow = (employee) => {
+  if (!employee) return null;
+
+  const firstName = employee.first_name || '';
+  const lastName = employee.last_name || '';
+  const salary = Number.parseFloat(employee.salary) || 0;
+
+  return {
+    id: employee.id,
+    name: `${firstName} ${lastName}`.trim() || 'Unnamed employee',
+    initials: `${firstName[0] || ''}${lastName[0] || ''}` || '??',
+    position: employee.position || '—',
+    department: employee.department_name || 'Unassigned',
+    email: employee.email || '—',
+    phone: employee.phone || '—',
+    // `new Date('2026-09-05').toLocaleDateString()` reads the stored string as
+    // UTC midnight, so it printed the 4th in any negative-offset zone.
+    hireDate: employee.hire_date ? formatStoredDate(employee.hire_date) : '—',
+    status: employee.status || 'Unknown',
+    companyId: employee.company_id || '—',
+    salary,
+    // The fallback here was `'$0'` — a dollar sign, in a peso payroll.
+    salaryLabel: formatCurrency(salary)
+  };
+};
 
 const Employees = () => {
+  const [employees, setEmployees] = useState([]);
+  const [departments, setDepartments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDepartment, setSelectedDepartment] = useState('All');
   const [selectedStatus, setSelectedStatus] = useState('All');
-  const [employees, setEmployees] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [departments, setDepartments] = useState([]);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [error, setError] = useState(''); // Add error state
-  const [success, setSuccess] = useState(''); // Add success state
-  const [stats, setStats] = useState({
-    totalEmployees: 0,
-    activeToday: 0,
-    onLeave: 0,
-    avgSalary: 0
-  });
 
   useEffect(() => {
     loadEmployees();
@@ -29,13 +90,11 @@ const Employees = () => {
     try {
       setLoading(true);
       setError('');
-      const data = await window.electronAPI.getAllEmployees();
-
-      setEmployees(data || []);
-      calculateStats(data || []);
-    } catch (error) {
-      console.error('Error loading employees:', error);
-      setError('Failed to load employees');
+      const data = await window.api.getAllEmployees();
+      setEmployees(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error('Error loading employees:', err);
+      setError('Failed to load employees. The local database may be unavailable.');
       setEmployees([]);
     } finally {
       setLoading(false);
@@ -44,509 +103,477 @@ const Employees = () => {
 
   const loadDepartments = async () => {
     try {
-      const data = await window.electronAPI.getAllDepartments();
-      setDepartments(data || []);
-    } catch (error) {
-      console.error('Error loading departments:', error);
+      const data = await window.api.getAllDepartments();
+      setDepartments(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error('Error loading departments:', err);
       setDepartments([]);
     }
   };
 
-  const calculateStats = (employeeData) => {
-    if (!employeeData || employeeData.length === 0) {
-      setStats({
-        totalEmployees: 0,
-        activeToday: 0,
-        onLeave: 0,
-        avgSalary: 0
-      });
-      return;
-    }
-
-    const total = employeeData.length;
-    const active = employeeData.filter(e => e.status === 'Active').length;
-    const onLeave = employeeData.filter(e => e.status === 'On Leave').length;
-    const avgSalary = employeeData.reduce((sum, e) => sum + parseFloat(e.salary || 0), 0) / employeeData.length;
-
-    setStats({
-      totalEmployees: total,
-      activeToday: active,
-      onLeave: onLeave,
-      avgSalary: Math.round(avgSalary)
-    });
-  };
-
-  // Handle delete success
   const handleDeleteSuccess = (message) => {
     setSuccess(message);
-    // Refresh the employee list
     loadEmployees();
-
-    // Clear success message after 3 seconds
     setTimeout(() => setSuccess(''), 3000);
   };
 
-  // Handle delete error
-  const handleDeleteError = (errorMessage) => {
-    setError(errorMessage);
-
-    // Clear error message after 5 seconds
+  const handleDeleteError = (message) => {
+    setError(message);
     setTimeout(() => setError(''), 5000);
   };
 
-  // Transform database employee to UI employee
-  const transformEmployeeForUI = (employee) => {
-    if (!employee) return null;
+  const rows = employees.map(toRow).filter(Boolean);
 
-    const firstName = employee.first_name || '';
-    const lastName = employee.last_name || '';
-    const fullName = `${firstName} ${lastName}`.trim();
+  // Derived from the rows the table renders instead of held in a second piece
+  // of state, which could only ever be a copy waiting to go stale.
+  const headcount = rows.length;
+  const active = rows.filter((row) => row.status === 'Active').length;
+  const onLeave = rows.filter((row) => row.status === 'On Leave').length;
+  const avgSalary =
+    headcount > 0 ? Math.round(rows.reduce((sum, row) => sum + row.salary, 0) / headcount) : 0;
 
-    // Generate avatar initials
-    const avatarText = (firstName[0] || '') + (lastName[0] || '') || '??';
+  const term = searchTerm.trim().toLowerCase();
+  const filtered = rows.filter((row) => {
+    const matchesSearch =
+      !term ||
+      row.name.toLowerCase().includes(term) ||
+      row.email.toLowerCase().includes(term) ||
+      row.companyId.toLowerCase().includes(term);
+    const matchesDepartment =
+      selectedDepartment === 'All' || row.department === selectedDepartment;
+    const matchesStatus = selectedStatus === 'All' || row.status === selectedStatus;
+    return matchesSearch && matchesDepartment && matchesStatus;
+  });
 
-    // Color mapping for avatars based on department
-    const department = employee.department_name || 'Unknown';
-    const avatarColors = {
-      'Engineering': 'bg-blue-100',
-      'Product': 'bg-purple-100',
-      'Design': 'bg-green-100',
-      'Human Resources': 'bg-yellow-100',
-      'Sales': 'bg-red-100',
-      'Marketing': 'bg-pink-100',
-      'Finance': 'bg-indigo-100',
-      'Unknown': 'bg-gray-100'
-    };
+  // Taken from the roster rather than the department table, so the list only
+  // offers filters that can match something.
+  const departmentOptions = [
+    'All',
+    ...[...new Set(rows.map((row) => row.department))].sort((a, b) => a.localeCompare(b))
+  ];
+  const filtersActive =
+    Boolean(term) || selectedDepartment !== 'All' || selectedStatus !== 'All';
 
-    return {
-      id: employee.id,
-      name: fullName || 'Unknown Name',
-      position: employee.position || 'Unknown',
-      department: department,
-      email: employee.email || 'No email',
-      phone: employee.phone || 'No phone',
-      hireDate: employee.hire_date ? new Date(employee.hire_date).toLocaleDateString() : 'Unknown',
-      status: employee.status || 'Unknown',
-      companyId: employee.company_id || 'No ID',
-      salary: employee.salary ? `₱${parseInt(employee.salary).toLocaleString()}` : '$0',
-      avatarColor: avatarColors[department] || 'bg-gray-100',
-      avatarText: avatarText,
-      rawSalary: parseFloat(employee.salary || 0)
-    };
+  const clearFilters = () => {
+    setSearchTerm('');
+    setSelectedDepartment('All');
+    setSelectedStatus('All');
   };
 
-  const statuses = ['All', 'Active', 'Inactive', 'On Leave'];
+  // Exports the rows on screen, filters included. The button that used to sit
+  // here logged `'Export functionality'` to a console no user opens.
+  const handleExport = () => {
+    if (filtered.length === 0) return;
 
-  const filteredEmployees = (employees || [])
-    .map(transformEmployeeForUI)
-    .filter(employee => {
-      if (!employee) return false;
+    downloadCsv(
+      `employees-${manilaDate()}.csv`,
+      toCsv(
+        [
+          'Employee',
+          'Company ID',
+          'Position',
+          'Department',
+          'Email',
+          'Phone',
+          'Status',
+          'Hire date',
+          'Monthly salary'
+        ],
+        filtered.map((row) => [
+          row.name,
+          row.companyId,
+          row.position,
+          row.department,
+          row.email,
+          row.phone,
+          row.status,
+          row.hireDate,
+          row.salary
+        ])
+      )
+    );
+  };
 
-      const matchesSearch = employee.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        employee.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        employee.companyId.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesDepartment = selectedDepartment === 'All' || employee.department === selectedDepartment;
-      const matchesStatus = selectedStatus === 'All' || employee.status === selectedStatus;
+  const share = (count) =>
+    headcount > 0 ? `${((count / headcount) * 100).toFixed(1)}% of headcount` : 'No records yet';
 
-      return matchesSearch && matchesDepartment && matchesStatus;
-    })
-    .filter(Boolean); // Remove any null values
-
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'Active': return 'bg-green-100 text-green-800';
-      case 'Inactive': return 'bg-red-100 text-red-800';
-      case 'On Leave': return 'bg-yellow-100 text-yellow-800';
-      default: return 'bg-gray-100 text-gray-800';
+  const tiles = [
+    {
+      label: 'Total employees',
+      value: headcount,
+      detail: `Across ${departments.length} ${departments.length === 1 ? 'department' : 'departments'}`,
+      icon: Users,
+      iconClass: 'bg-[rgb(96_165_250/0.14)] text-info'
+    },
+    {
+      label: 'Active',
+      value: active,
+      detail: share(active),
+      icon: CheckCircle,
+      iconClass: 'bg-[rgb(34_197_94/0.14)] text-accent'
+    },
+    {
+      label: 'On leave',
+      value: onLeave,
+      detail: share(onLeave),
+      icon: CalendarOff,
+      iconClass: 'bg-[rgb(251_191_36/0.14)] text-warning'
+    },
+    {
+      // The card read "Avg. Annual Salary" over a column the payroll calculator
+      // divides by 24 to get a daily rate.
+      label: 'Avg. monthly salary',
+      value: formatCurrency(avgSalary),
+      detail: 'Basic pay, before allowances',
+      icon: PhilippinePeso,
+      iconClass: 'bg-[rgb(148_163_184/0.14)] text-foreground'
     }
-  };
+  ];
 
-  const getDepartmentColor = (department) => {
-    switch (department) {
-      case 'Engineering': return 'bg-blue-100 text-blue-800';
-      case 'Product': return 'bg-purple-100 text-purple-800';
-      case 'Design': return 'bg-green-100 text-green-800';
-      case 'Human Resources': return 'bg-yellow-100 text-yellow-800';
-      case 'Sales': return 'bg-red-100 text-red-800';
-      case 'Marketing': return 'bg-pink-100 text-pink-800';
-      case 'Finance': return 'bg-indigo-100 text-indigo-800';
-      default: return 'bg-gray-100 text-gray-800';
-    }
-  };
-
-  // Format currency
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-PH', {
-      style: 'currency',
-      currency: 'PHP',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0
-    }).format(amount);
-  };
-
-  // Get unique departments from employees
-  const uniqueDepartments = ['All', ...new Set((employees || []).map(e => e.department_name).filter(Boolean))];
-
-  // Handle Add Employee button click
-  const handleAddEmployeeClick = () => {
-    setShowAddModal(true);
-  };
-
-  // Callback when employee is added
-  const handleEmployeeAdded = () => {
-    loadEmployees(); // Refresh the list
-  };
-
-  // Handle view employee details
-  const handleViewEmployee = (id) => {
-
-    // You can implement a modal or navigate to employee detail page
-  };
-
-  // Handle edit employee
-  const handleEditEmployee = (id) => {
-
-    // You can implement edit modal or form
-  };
+  const departmentBars = [...departments]
+    .map((department) => ({
+      name: department.name || 'Unassigned',
+      count: rows.filter((row) => row.department === department.name).length
+    }))
+    .sort((a, b) => b.count - a.count);
 
   return (
-    <div className="space-y-6">
-      {/* Page Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl md:text-2xl font-bold text-gray-900">Employee Management</h1>
-          <p className="text-gray-600 mt-1">Manage all employee information, departments, and roles</p>
+    <div className="page">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h2 className="page-title">Employees</h2>
+          <p className="page-subtitle mt-1">
+            {headcount === 1 ? '1 record' : `${headcount} records`} · {active} active ·{' '}
+            {onLeave} on leave
+          </p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex shrink-0 items-center gap-2">
           <button
-            className="flex items-center gap-2 px-4 py-2.5 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-            onClick={() => console.log('Export functionality')}
+            type="button"
+            onClick={handleExport}
+            disabled={filtered.length === 0}
+            className="btn btn-outline btn-sm"
+            title="Exports the rows listed below"
           >
-            <Download size={18} />
-            Export
+            <Download size={15} aria-hidden="true" />
+            Export CSV
           </button>
           <button
-            onClick={handleAddEmployeeClick}
-            className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            type="button"
+            onClick={() => setShowAddModal(true)}
+            className="btn btn-primary btn-sm"
           >
-            <UserPlus size={18} />
-            Add Employee
+            <UserPlus size={15} aria-hidden="true" />
+            Add employee
           </button>
         </div>
       </div>
 
-      {/* Success and Error Messages */}
+      {/* Both messages clear themselves on a timer; each is announced, the
+          error assertively. */}
       {success && (
-        <div className="p-3 bg-green-50 border border-green-200 rounded text-green-600 text-sm">
-          {success}
+        <div className="alert alert-success" role="status">
+          <CheckCircle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <p className="flex-1">{success}</p>
         </div>
       )}
-
       {error && (
-        <div className="p-3 bg-red-50 border border-red-200 rounded text-red-600 text-sm">
-          {error}
+        <div className="alert alert-danger" role="alert">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <p className="flex-1">{error}</p>
         </div>
       )}
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white p-2 rounded-xl border border-gray-200">
-          <div className="flex justify-between items-start">
-            <div>
-              <p className="text-sm text-gray-600">Total Employees</p>
-              <p className="text-xl font-bold mt-1">{stats.totalEmployees}</p>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {tiles.map((tile, index) => {
+          const Icon = tile.icon;
+          return (
+            <div
+              key={tile.label}
+              className="card stagger-card flex items-start justify-between gap-3 p-4"
+              style={{ '--i': index }}
+            >
+              <div className="min-w-0">
+                <p className="kpi-label truncate-1">{tile.label}</p>
+                <p className="kpi-value mt-1.5">{tile.value}</p>
+                <p className="mt-2 text-xs text-muted-foreground">{tile.detail}</p>
+              </div>
+              <span className={`kpi-icon ${tile.iconClass}`}>
+                <Icon size={20} aria-hidden="true" />
+              </span>
             </div>
-            <div className="p-2 bg-blue-50 rounded-lg">
-              <Users className="text-blue-500" size={20} />
-            </div>
+          );
+        })}
+      </div>
+
+      <div className="card grid grid-cols-1 gap-3 p-4 md:grid-cols-[minmax(0,1fr)_190px_170px_auto]">
+        <div className="min-w-0">
+          <label htmlFor="employee-search" className="label">
+            Search
+          </label>
+          <div className="input-group">
+            <Search className="input-icon" size={16} aria-hidden="true" />
+            <input
+              id="employee-search"
+              type="search"
+              className="input"
+              placeholder="Name, email or company ID"
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+            />
           </div>
-          <p className="text-sm text-green-600 mt-2">
-            {stats.totalEmployees > 0 ? `${stats.totalEmployees} employees in system` : 'No employees yet'}
-          </p>
         </div>
 
-        <div className="bg-white p-2 rounded-xl border border-gray-200">
-          <div className="flex justify-between items-start">
-            <div>
-              <p className="text-sm text-gray-600">Active</p>
-              <p className="text-xl font-bold mt-1">{stats.activeToday}</p>
-            </div>
-            <div className="p-2 bg-green-50 rounded-lg">
-              <Users className="text-green-500" size={20} />
-            </div>
-          </div>
-          <p className="text-sm text-gray-600 mt-2">
-            {stats.activeToday > 0 ? 'Active employees' : 'No active employees'}
-          </p>
+        <div className="min-w-0">
+          <label htmlFor="employee-department" className="label">
+            Department
+          </label>
+          <select
+            id="employee-department"
+            className="select"
+            value={selectedDepartment}
+            onChange={(event) => setSelectedDepartment(event.target.value)}
+          >
+            {departmentOptions.map((option) => (
+              <option key={option} value={option}>
+                {option === 'All' ? 'All departments' : option}
+              </option>
+            ))}
+          </select>
         </div>
 
-        <div className="bg-white p-2 rounded-xl border border-gray-200">
-          <div className="flex justify-between items-start">
-            <div>
-              <p className="text-sm text-gray-600">On Leave</p>
-              <p className="text-xl font-bold mt-1">{stats.onLeave}</p>
-            </div>
-            <div className="p-2 bg-yellow-50 rounded-lg">
-              <Calendar className="text-yellow-500" size={20} />
-            </div>
-          </div>
-          <p className="text-sm text-gray-600 mt-2">
-            {stats.onLeave > 0 ? 'Employees on leave' : 'No employees on leave'}
-          </p>
+        <div className="min-w-0">
+          <label htmlFor="employee-status" className="label">
+            Status
+          </label>
+          <select
+            id="employee-status"
+            className="select"
+            value={selectedStatus}
+            onChange={(event) => setSelectedStatus(event.target.value)}
+          >
+            {STATUSES.map((status) => (
+              <option key={status} value={status}>
+                {status === 'All' ? 'All statuses' : status}
+              </option>
+            ))}
+          </select>
         </div>
 
-        <div className="bg-white p-2 rounded-xl border border-gray-200">
-          <div className="flex justify-between items-start">
-            <div>
-              <p className="text-sm text-gray-600">Avg. Annual Salary</p>
-              <p className="text-xl font-bold mt-1">{formatCurrency(stats.avgSalary)}</p>
-            </div>
-            <div className="p-2 bg-purple-50 rounded-lg">
-              <CreditCard className="text-purple-500" size={20} />
-            </div>
-          </div>
-          <p className="text-sm text-gray-600 mt-2">
-            {stats.avgSalary > 0 ? 'Average salary' : 'No salary data'}
-          </p>
+        {/* Replaces a "More Filters" button that logged to the console. This one
+            clears the three filters that actually exist. */}
+        <div className="flex items-end">
+          <button
+            type="button"
+            onClick={clearFilters}
+            disabled={!filtersActive}
+            className="btn btn-ghost w-full md:w-auto"
+          >
+            <X size={15} aria-hidden="true" />
+            Clear
+          </button>
         </div>
       </div>
 
-      {/* Filters and Search */}
-      <div className="bg-white rounded-xl border border-gray-200 p-5">
-        <div className="flex flex-col md:flex-row gap-4">
-          {/* Search */}
-          <div className="flex-1">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
-              <input
-                type="text"
-                placeholder="Search employees by name, email, or ID..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-            </div>
-          </div>
-
-          {/* Filters */}
-          <div className="flex gap-3">
-            <select
-              value={selectedDepartment}
-              onChange={(e) => setSelectedDepartment(e.target.value)}
-              className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              {uniqueDepartments.map(dept => (
-                <option key={dept} value={dept}>
-                  {dept === 'All' ? 'All Departments' : dept}
-                </option>
-              ))}
-            </select>
-
-            <select
-              value={selectedStatus}
-              onChange={(e) => setSelectedStatus(e.target.value)}
-              className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              {statuses.map(status => (
-                <option key={status} value={status}>
-                  {status}
-                </option>
-              ))}
-            </select>
-
-            <button
-              className="flex items-center gap-2 px-4 py-2.5 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-              onClick={() => console.log('More filters')}
-            >
-              <Filter size={18} />
-              More Filters
-            </button>
-          </div>
+      <section className="flex flex-col gap-2" aria-labelledby="roster-heading">
+        <div className="flex flex-wrap items-baseline justify-between gap-3">
+          <h3 id="roster-heading" className="section-title">
+            Roster
+          </h3>
+          {/* What the "Showing 1 to N of N employees" line said, without the
+              Previous/1/Next controls that sat beside it: both were disabled
+              unconditionally, and nothing on this page pages. */}
+          <p className="text-xs tabular-nums text-muted-foreground">
+            {filtered.length === headcount
+              ? `${headcount} ${headcount === 1 ? 'employee' : 'employees'}`
+              : `${filtered.length} of ${headcount} shown`}
+          </p>
         </div>
-      </div>
 
-      {/* Employee Table */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         {loading ? (
-          <div className="flex items-center justify-center p-12">
-            <div className="flex flex-col items-center gap-3">
-              <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
-              <p className="text-gray-600">Loading employees...</p>
+          <div
+            className="card flex items-center justify-center py-16"
+            role="status"
+            aria-live="polite"
+          >
+            <span className="spinner spinner-lg text-accent" aria-hidden="true" />
+            <span className="sr-only">Loading employees…</span>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="card">
+            <div className="empty-state">
+              <span className="empty-state-icon" aria-hidden="true">
+                <Users size={26} />
+              </span>
+              {headcount === 0 ? (
+                <>
+                  <p className="text-sm">No employees on record.</p>
+                  <p className="text-xs">Add the first one with the button above.</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm">No employees match these filters.</p>
+                  <button
+                    type="button"
+                    onClick={clearFilters}
+                    className="btn btn-outline btn-sm mt-1"
+                  >
+                    <X size={15} aria-hidden="true" />
+                    Clear filters
+                  </button>
+                </>
+              )}
             </div>
           </div>
         ) : (
-          <>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="py-4 px-6 text-left text-sm font-semibold text-gray-700">Employee</th>
-                    <th className="py-4 px-6 text-left text-sm font-semibold text-gray-700">Position</th>
-                    <th className="py-4 px-6 text-left text-sm font-semibold text-gray-700">Department</th>
-                    <th className="py-4 px-6 text-left text-sm font-semibold text-gray-700">Contact</th>
-                    <th className="py-4 px-6 text-left text-sm font-semibold text-gray-700">Status</th>
-                    <th className="py-4 px-6 text-left text-sm font-semibold text-gray-700">Actions</th>
+          // Bounded so the sticky header earns its keep: the roster is the one
+          // table here with no upper row count.
+          <div className="table-container max-h-[62vh]">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th scope="col">Employee</th>
+                  <th scope="col">Position</th>
+                  <th scope="col">Department</th>
+                  <th scope="col">Contact</th>
+                  <th scope="col">Status</th>
+                  <th scope="col" className="text-right">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((row, index) => (
+                  <tr key={row.id} className="stagger-row" style={{ '--i': index }}>
+                    <td>
+                      <div className="flex items-center gap-3">
+                        <span className="avatar h-9 w-9 text-xs">{row.initials}</span>
+                        <span className="min-w-0">
+                          <span className="block truncate-1 font-medium" title={row.name}>
+                            {row.name}
+                          </span>
+                          <span className="block text-xs text-muted-foreground">
+                            {row.companyId} · hired {row.hireDate}
+                          </span>
+                        </span>
+                      </div>
+                    </td>
+                    <td>
+                      <span className="block truncate-1" title={row.position}>
+                        {row.position}
+                      </span>
+                      <span className="block text-xs text-muted-foreground">
+                        {row.salaryLabel} / month
+                      </span>
+                    </td>
+                    <td>
+                      <span className="badge badge-muted">{row.department}</span>
+                    </td>
+                    <td>
+                      <span className="flex items-center gap-2 text-xs">
+                        <Mail
+                          size={13}
+                          className="shrink-0 text-muted-foreground"
+                          aria-hidden="true"
+                        />
+                        <span className="wrap-anywhere">{row.email}</span>
+                      </span>
+                      <span className="mt-1 flex items-center gap-2 text-xs">
+                        <Phone
+                          size={13}
+                          className="shrink-0 text-muted-foreground"
+                          aria-hidden="true"
+                        />
+                        <span>{row.phone}</span>
+                      </span>
+                    </td>
+                    <td>
+                      <span className={`badge ${STATUS_BADGE[row.status] || 'badge-muted'}`}>
+                        {row.status}
+                      </span>
+                    </td>
+                    {/* View and Edit sat here as empty functions, and a
+                        MoreVertical button logged 'More options'. Delete is the
+                        one action this page can carry out. */}
+                    <td className="text-right">
+                      <DeleteEmployee
+                        employeeId={row.id}
+                        employeeName={row.name}
+                        onDeleteSuccess={handleDeleteSuccess}
+                        onDeleteError={handleDeleteError}
+                      />
+                    </td>
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {filteredEmployees.length === 0 ? (
-                    <tr>
-                      <td colSpan="6" className="py-8 px-6 text-center text-gray-500">
-                        {employees.length === 0 ? 'No employees found. Add your first employee using the "Add Employee" button.' : 'No employees match your filters.'}
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredEmployees.map((employee) => (
-                      <tr key={employee.id} className="hover:bg-gray-50">
-                        <td className="py-4 px-6">
-                          <div className="flex items-center gap-3">
-                            <div className={`${employee.avatarColor} w-10 h-10 rounded-full flex items-center justify-center`}>
-                              <span className="font-semibold text-gray-800">{employee.avatarText}</span>
-                            </div>
-                            <div>
-                              <p className="font-medium">{employee.name}</p>
-                              <p className="text-sm text-gray-500">ID: {employee.companyId}</p>
-                              <p className="text-xs text-gray-400">Hired: {employee.hireDate}</p>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="py-4 px-6">
-                          <div>
-                            <p className="font-medium">{employee.position}</p>
-                            <p className="text-sm text-gray-500">{employee.salary}/month</p>
-                          </div>
-                        </td>
-                        <td className="py-4 px-6">
-                          <span className={`px-3 py-1 rounded-full text-xs font-medium ${getDepartmentColor(employee.department)}`}>
-                            {employee.department}
-                          </span>
-                        </td>
-                        <td className="py-4 px-6">
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-2">
-                              <Mail size={14} className="text-gray-400" />
-                              <span className="text-sm truncate max-w-45">{employee.email}</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <Phone size={14} className="text-gray-400" />
-                              <span className="text-sm">{employee.phone}</span>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="py-4 px-6">
-                          <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(employee.status)}`}>
-                            {employee.status}
-                          </span>
-                        </td>
-                        <td className="py-4 px-6">
-                          <div className="flex items-center gap-2">
-                            <button
-                              className="p-2 hover:bg-gray-100 rounded-lg"
-                              title="View Details"
-                              onClick={() => handleViewEmployee(employee.id)}
-                            >
-                              <Eye size={18} className="text-blue-600 hover:text-blue-700" />
-                            </button>
-                            <button
-                              className="p-2 hover:bg-gray-100 rounded-lg"
-                              title="Edit"
-                              onClick={() => handleEditEmployee(employee.id)}
-                            >
-                              <Edit size={18} className="text-green-600 hover:text-green-700" />
-                            </button>
-                            <DeleteEmployee
-                              employeeId={employee.id}
-                              employeeName={employee.name}
-                              onDeleteSuccess={handleDeleteSuccess}
-                              onDeleteError={handleDeleteError}
-                            />
-                            <button
-                              className="p-2 hover:bg-gray-100 rounded-lg"
-                              onClick={() => console.log('More options')}
-                            >
-                              <MoreVertical size={18} className="text-gray-600 hover:text-gray-700" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Pagination */}
-            <div className="p-6 border-t border-gray-200 flex flex-col sm:flex-row justify-between items-center gap-4">
-              <div className="text-sm text-gray-600">
-                Showing {filteredEmployees.length > 0 ? 1 : 0} to {filteredEmployees.length} of {employees.length} employees
-              </div>
-              <div className="flex gap-2">
-                <button
-                  className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                  disabled={true}
-                >
-                  Previous
-                </button>
-                <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-                  1
-                </button>
-                <button
-                  className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-                  disabled={true}
-                >
-                  Next
-                </button>
-              </div>
-            </div>
-          </>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
-      </div>
+      </section>
 
-      {/* Department Distribution */}
-      <div className="bg-white rounded-xl border border-gray-200 p-6">
-        <h3 className="font-bold text-lg mb-4">Department Distribution</h3>
-        {departments.length === 0 ? (
-          <p className="text-gray-500 text-center py-4">No departments found. Add departments to see distribution.</p>
+      <section className="card p-5" aria-labelledby="distribution-heading">
+        <div className="flex flex-wrap items-baseline justify-between gap-3">
+          <h3 id="distribution-heading" className="section-title">
+            Department distribution
+          </h3>
+          {/* The grid was sliced to the first four departments by insertion
+              order, with nothing to say the rest existed. All of them are here,
+              busiest first. */}
+          <p className="text-xs text-muted-foreground">
+            Share of the {headcount === 1 ? '1 record' : `${headcount} records`} on file
+          </p>
+        </div>
+
+        {departmentBars.length === 0 ? (
+          <div className="empty-state">
+            <span className="empty-state-icon" aria-hidden="true">
+              <Building2 size={26} />
+            </span>
+            <p className="text-sm">No departments yet.</p>
+            <p className="text-xs">Create one from Departments before adding employees.</p>
+          </div>
         ) : (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {departments.slice(0, 4).map((dept, index) => {
-              const employeeCount = (employees || []).filter(e => e.department_name === dept.name).length;
-              const percentage = employees.length > 0 ? (employeeCount / employees.length * 100).toFixed(1) : 0;
-              const colorMap = {
-                'Engineering': 'bg-blue-500',
-                'Product': 'bg-indigo-500',
-                'Design': 'bg-teal-500',
-                'Human Resources': 'bg-yellow-500',
-                'Sales': 'bg-green-500',
-                'Marketing': 'bg-purple-500',
-                'Finance': 'bg-pink-500'
-              };
-
+          <ul className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {departmentBars.map((bar) => {
+              const percentage = headcount > 0 ? (bar.count / headcount) * 100 : 0;
               return (
-                <div key={index} className="p-4 border border-gray-200 rounded-lg">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-medium">{dept.name}</span>
-                    <span className="text-lg font-bold">{employeeCount}</span>
+                <li key={bar.name} className="surface px-3 py-3">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="truncate-1 text-sm font-medium" title={bar.name}>
+                      {bar.name}
+                    </span>
+                    <span className="shrink-0 font-display text-sm font-semibold tabular-nums">
+                      {bar.count}
+                    </span>
                   </div>
-                  <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+                  <div
+                    className="progress mt-2"
+                    role="progressbar"
+                    aria-valuenow={Math.round(percentage)}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-label={`${bar.name} share of headcount`}
+                  >
                     <div
-                      className={`h-full ${colorMap[dept.name] || 'bg-gray-500'} rounded-full`}
-                      style={{ width: `${percentage}%` }}
-                    ></div>
+                      className="progress-bar"
+                      style={{ width: `${Math.min(100, percentage)}%` }}
+                    />
                   </div>
-                  <p className="text-sm text-gray-500 mt-2">{percentage}% of total ({employeeCount} employees)</p>
-                </div>
+                  <p className="mt-1.5 text-xs tabular-nums text-muted-foreground">
+                    {percentage.toFixed(1)}% ·{' '}
+                    {bar.count === 1 ? '1 employee' : `${bar.count} employees`}
+                  </p>
+                </li>
               );
             })}
-          </div>
+          </ul>
         )}
-      </div>
+      </section>
 
-      {/* Add Employee Modal */}
       <AddEmployee
         isOpen={showAddModal}
         onClose={() => setShowAddModal(false)}
-        onEmployeeAdded={handleEmployeeAdded}
+        onEmployeeAdded={loadEmployees}
       />
     </div>
   );

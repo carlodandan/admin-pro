@@ -1,492 +1,554 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Clock, KeyRound, User, LogOut, CheckCircle, XCircle, Lock, Loader2, AlertCircle } from 'lucide-react';
+import {
+  AlertCircle,
+  CheckCircle,
+  ChevronLeft,
+  KeyRound,
+  Loader2,
+  Lock,
+  XCircle
+} from 'lucide-react';
 import Keypad from '../components/Kiosk/Keypad';
+import { useDialog } from '../hooks/useDialog';
 import { useUser } from '../contexts/UserContext';
+import { formatStoredDate, formatStoredTime, manilaClock, manilaDate, manilaTime } from '../utils/manila';
+
+/** The step titles, in the order the two flows walk them. */
+const STEP_TITLE = {
+  ID: 'Enter employee ID',
+  PIN: 'Enter secure PIN',
+  OLD_PIN: 'Enter current PIN',
+  NEW_PIN: 'Enter new PIN',
+  CONFIRM_PIN: 'Confirm new PIN'
+};
+
+/** Where Back goes from each step, and which field it clears on the way. */
+const BACK_STEP = {
+  PIN: 'ID',
+  OLD_PIN: 'ID',
+  NEW_PIN: 'OLD_PIN',
+  CONFIRM_PIN: 'NEW_PIN'
+};
 
 const AttendanceKiosk = () => {
-    const navigate = useNavigate();
-    const [currentTime, setCurrentTime] = useState(new Date());
+  const navigate = useNavigate();
+  const { user } = useUser();
 
-    // States: 'ID' -> 'PIN' -> 'PROCESSING' -> 'RESULT'
-    // Change PIN Mode: 'ID' -> 'OLD_PIN' -> 'NEW_PIN' -> 'CONFIRM_PIN' -> 'PROCESSING_CHANGE' -> 'RESULT'
-    const { user } = useUser();
-    const [mode, setMode] = useState('ATTENDANCE'); // 'ATTENDANCE' or 'CHANGE_PIN'
-    const [step, setStep] = useState('ID');
-    const [employeeId, setEmployeeId] = useState('');
-    const [pin, setPin] = useState('');
-    const [newPin, setNewPin] = useState('');
-    const [confirmPin, setConfirmPin] = useState('');
-    const [feedback, setFeedback] = useState(null); // { type: 'success'|'error', message: '', record: null }
+  const [currentTime, setCurrentTime] = useState(new Date());
 
-    // Exit Kiosk State
-    const [showExitModal, setShowExitModal] = useState(false);
-    const [adminPassword, setAdminPassword] = useState('');
-    const [exitError, setExitError] = useState('');
-    const [isVerifying, setIsVerifying] = useState(false);
+  // 'ATTENDANCE': ID → PIN → PROCESSING → RESULT.
+  // 'CHANGE_PIN': ID → OLD_PIN → NEW_PIN → CONFIRM_PIN → PROCESSING → RESULT.
+  const [mode, setMode] = useState('ATTENDANCE');
+  const [step, setStep] = useState('ID');
+  const [employeeId, setEmployeeId] = useState('');
+  const [pin, setPin] = useState('');
+  const [newPin, setNewPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
+  const [feedback, setFeedback] = useState(null);
+  // Replaces two `alert()` calls. A modal dialog on an unattended kiosk needs
+  // someone with a mouse to dismiss it before the next person can punch in.
+  const [hint, setHint] = useState('');
 
-    // Real-time clock effect
-    useEffect(() => {
-        const timer = setInterval(() => {
-            setCurrentTime(new Date());
-        }, 1000);
-        return () => clearInterval(timer);
-    }, []);
+  const [showExitModal, setShowExitModal] = useState(false);
+  const [adminPassword, setAdminPassword] = useState('');
+  const [exitError, setExitError] = useState('');
+  const [isVerifying, setIsVerifying] = useState(false);
 
-    // Format time for Manila
-    const timeString = currentTime.toLocaleTimeString('en-US', {
-        timeZone: 'Asia/Manila',
-        hour12: true,
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit'
-    });
+  const closeExit = () => {
+    if (isVerifying) return;
+    setShowExitModal(false);
+    setAdminPassword('');
+    setExitError('');
+  };
 
-    const dateString = currentTime.toLocaleDateString('en-US', {
-        timeZone: 'Asia/Manila',
-        weekday: 'long',
-        month: 'long',
-        day: 'numeric',
-        year: 'numeric'
-    });
+  const exitRef = useDialog(showExitModal, closeExit);
 
-    // Handle Keypad Input
-    const handleKeyPress = (key) => {
-        if (step === 'ID') {
-            if (employeeId.length < 10) setEmployeeId(prev => prev + key);
-        } else if (step === 'PIN' || step === 'OLD_PIN') {
-            if (pin.length < 6) setPin(prev => prev + key);
-        } else if (step === 'NEW_PIN') {
-            if (newPin.length < 6) setNewPin(prev => prev + key);
-        } else if (step === 'CONFIRM_PIN') {
-            if (confirmPin.length < 6) setConfirmPin(prev => prev + key);
-        }
-    };
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
-    const handleClear = () => {
-        if (step === 'ID') {
-            setEmployeeId(prev => prev.slice(0, -1));
-        } else if (step === 'PIN' || step === 'OLD_PIN') {
-            setPin(prev => prev.slice(0, -1));
-        } else if (step === 'NEW_PIN') {
-            setNewPin(prev => prev.slice(0, -1));
-        } else if (step === 'CONFIRM_PIN') {
-            setConfirmPin(prev => prev.slice(0, -1));
-        }
-    };
+  const timeString = manilaClock(currentTime);
+  const dateString = formatStoredDate(manilaDate(currentTime), {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric'
+  });
+  // The auto-reset used to be a bare `setTimeout`: pressing "Try again" started
+  // a fresh entry that the earlier timer then wiped four seconds later, mid-typing.
+  const resetTimer = useRef(null);
 
-    const handleEnter = async () => {
-        if (step === 'ID') {
-            if (employeeId.trim().length > 0) {
-                if (mode === 'ATTENDANCE') setStep('PIN');
-                else setStep('OLD_PIN');
-            }
-        } else if (step === 'PIN') {
-            if (pin.trim().length > 0) await processAttendance();
-        } else if (step === 'OLD_PIN') {
-            if (pin.trim().length > 0) setStep('NEW_PIN');
-        } else if (step === 'NEW_PIN') {
-            if (newPin.trim().length >= 4) setStep('CONFIRM_PIN');
-            else alert('PIN must be at least 4 digits');
-        } else if (step === 'CONFIRM_PIN') {
-            if (confirmPin === newPin) await processPinChange();
-            else {
-                alert('PINs do not match');
-                setConfirmPin('');
-            }
-        }
-    };
+  const resetKiosk = () => {
+    if (resetTimer.current) {
+      clearTimeout(resetTimer.current);
+      resetTimer.current = null;
+    }
+    setMode('ATTENDANCE');
+    setStep('ID');
+    setEmployeeId('');
+    setPin('');
+    setNewPin('');
+    setConfirmPin('');
+    setFeedback(null);
+    setHint('');
+  };
 
-    const processAttendance = async () => {
-        setStep('PROCESSING');
+  const scheduleReset = () => {
+    if (resetTimer.current) clearTimeout(resetTimer.current);
+    resetTimer.current = setTimeout(resetKiosk, 4000);
+  };
 
-        try {
-            // 1. Verify credentials
-            const fullCompanyId = `EMP-${employeeId}`;
-            const verifyResult = await window.electronAPI.verifyEmployeePin(fullCompanyId, pin);
+  useEffect(
+    () => () => {
+      if (resetTimer.current) clearTimeout(resetTimer.current);
+    },
+    []
+  );
 
-            if (!verifyResult.success) {
-                throw new Error(verifyResult.message || 'Invalid credentials');
-            }
+  const handleKeyPress = (key) => {
+    setHint('');
+    if (step === 'ID') {
+      if (employeeId.length < 10) setEmployeeId((prev) => prev + key);
+    } else if (step === 'PIN' || step === 'OLD_PIN') {
+      if (pin.length < 6) setPin((prev) => prev + key);
+    } else if (step === 'NEW_PIN') {
+      if (newPin.length < 6) setNewPin((prev) => prev + key);
+    } else if (step === 'CONFIRM_PIN') {
+      if (confirmPin.length < 6) setConfirmPin((prev) => prev + key);
+    }
+  };
 
-            const employee = verifyResult.employee;
+  const handleClear = () => {
+    setHint('');
+    if (step === 'ID') setEmployeeId((prev) => prev.slice(0, -1));
+    else if (step === 'PIN' || step === 'OLD_PIN') setPin((prev) => prev.slice(0, -1));
+    else if (step === 'NEW_PIN') setNewPin((prev) => prev.slice(0, -1));
+    else if (step === 'CONFIRM_PIN') setConfirmPin((prev) => prev.slice(0, -1));
+  };
+  const handleBack = () => {
+    const target = BACK_STEP[step];
+    if (!target) return;
+    setHint('');
+    if (step === 'PIN' || step === 'OLD_PIN') setPin('');
+    else if (step === 'NEW_PIN') setNewPin('');
+    else if (step === 'CONFIRM_PIN') setConfirmPin('');
+    setStep(target);
+  };
 
-            // 2. Check latest status
-            const todayRecord = await window.electronAPI.getLatestAttendance(employee.id);
-
-            let action = 'check_in'; // Default
-            if (todayRecord) {
-                if (todayRecord.check_in && !todayRecord.check_out) {
-                    action = 'check_out';
-                } else if (todayRecord.check_in && todayRecord.check_out) {
-                    throw new Error('You have already completed your shift today.');
-                }
-            }
-
-            // 3. Record attendance
-            const attendanceData = {
-                employee_id: employee.id,
-                date: new Date().toISOString().split('T')[0], // Use properly formatted date YYYY-MM-DD
-            };
-
-            const nowTime = new Date().toLocaleTimeString('en-GB', {
-                timeZone: 'Asia/Manila',
-                hour12: false
-            });
-
-            if (action === 'check_in') {
-                attendanceData.check_in = nowTime;
-                attendanceData.status = 'Present';
-                attendanceData.notes = 'Kiosk Time In';
-            } else {
-                attendanceData.check_out = nowTime;
-                // Don't overwrite status or check_in
-                attendanceData.notes = todayRecord.notes + ' | Kiosk Time Out';
-            }
-
-            await window.electronAPI.recordAttendance(attendanceData);
-
-            // 4. Success Feedback
-            setFeedback({
-                type: 'success',
-                message: action === 'check_in' ? 'Time In Recorded' : 'Time Out Recorded',
-                employeeName: `${employee.first_name} ${employee.last_name}`,
-                time: nowTime
-            });
-            setStep('RESULT');
-
-        } catch (error) {
-            setFeedback({
-                type: 'error',
-                message: error.message
-            });
-            setStep('RESULT');
-        }
-
-        // Auto-reset after delay
-        setTimeout(() => {
-            resetKiosk();
-        }, 4000);
-    };
-
-    const processPinChange = async () => {
-        setStep('PROCESSING');
-
-        try {
-            // 1. Verify old credentials
-            const fullCompanyId = `EMP-${employeeId}`;
-            const verifyResult = await window.electronAPI.verifyEmployeePin(fullCompanyId, pin);
-
-            if (!verifyResult.success) {
-                throw new Error('Invalid Old PIN');
-            }
-
-            const employee = verifyResult.employee;
-
-            // 2. Update PIN
-            const updateResult = await window.electronAPI.updateEmployeePin(employee.id, newPin);
-
-            if (!updateResult.success) throw new Error(updateResult.message);
-
-            setFeedback({
-                type: 'success',
-                message: 'PIN Changed Successfully',
-                employeeName: 'Please use your new PIN next time.',
-                time: ''
-            });
-            setStep('RESULT');
-
-        } catch (error) {
-            setFeedback({
-                type: 'error',
-                message: error.message
-            });
-            setStep('RESULT'); // Show error then retry?
-        }
-
-        setTimeout(() => {
-            resetKiosk();
-        }, 4000);
-    };
-
-    const resetKiosk = () => {
-        setMode('ATTENDANCE');
-        setStep('ID');
-        setEmployeeId('');
-        setPin('');
-        setNewPin('');
+  const handleEnter = async () => {
+    if (step === 'ID') {
+      if (employeeId.trim().length === 0) {
+        setHint('Enter your employee number first.');
+        return;
+      }
+      setHint('');
+      setStep(mode === 'ATTENDANCE' ? 'PIN' : 'OLD_PIN');
+    } else if (step === 'PIN') {
+      if (pin.trim().length === 0) {
+        setHint('Enter your PIN.');
+        return;
+      }
+      await processAttendance();
+    } else if (step === 'OLD_PIN') {
+      if (pin.trim().length === 0) {
+        setHint('Enter your current PIN.');
+        return;
+      }
+      setHint('');
+      setStep('NEW_PIN');
+    } else if (step === 'NEW_PIN') {
+      if (newPin.trim().length < 4) {
+        setHint('The new PIN needs at least four digits.');
+        return;
+      }
+      setHint('');
+      setStep('CONFIRM_PIN');
+    } else if (step === 'CONFIRM_PIN') {
+      if (confirmPin !== newPin) {
         setConfirmPin('');
-        setFeedback(null);
-    };
+        setHint('Those did not match. Enter the new PIN again.');
+        return;
+      }
+      await processPinChange();
+    }
+  };
+  const processAttendance = async () => {
+    setStep('PROCESSING');
 
-    const handleExitKiosk = async (e) => {
-        e.preventDefault();
-        setIsVerifying(true);
-        setExitError('');
+    try {
+      const fullCompanyId = `EMP-${employeeId}`;
+      const verifyResult = await window.api.verifyEmployeePin(fullCompanyId, pin);
+      if (!verifyResult.success) {
+        throw new Error(verifyResult.message || 'Invalid credentials');
+      }
 
-        try {
-            if (!adminPassword) {
-                throw new Error('Password is required');
-            }
+      const employee = verifyResult.employee;
+      const todayRecord = await window.api.getLatestAttendance(employee.id);
 
-            // Verify admin password
-            const result = await window.electronAPI.loginUser(user.email, adminPassword);
-
-            if (result.success) {
-                // Success - Exit Kiosk
-                navigate('/dashboard');
-            } else {
-                throw new Error(result.error || 'Invalid password');
-            }
-        } catch (error) {
-            console.error('Kiosk exit error:', error);
-            setExitError(error.message);
-        } finally {
-            setIsVerifying(false);
+      let action = 'check_in';
+      if (todayRecord) {
+        if (todayRecord.check_in && !todayRecord.check_out) {
+          action = 'check_out';
+        } else if (todayRecord.check_in && todayRecord.check_out) {
+          throw new Error('You have already completed your shift today.');
         }
+      }
+
+      const nowTime = manilaTime();
+      const attendance = {
+        employee_id: employee.id,
+        // `getLatestAttendance` looks the row up by Manila's today in Rust. This
+        // was `toISOString().split('T')[0]`, the UTC date, so between midnight
+        // and 08:00 the kiosk read today's row and then wrote yesterday's.
+        date: manilaDate()
+      };
+
+      if (action === 'check_in') {
+        attendance.check_in = nowTime;
+        attendance.status = 'Present';
+        attendance.notes = 'Kiosk Time In';
+      } else {
+        attendance.check_out = nowTime;
+        // Status and check_in are left out on purpose: the upsert coalesces, so
+        // omitting them preserves the morning punch. Concatenating onto a null
+        // `notes` used to store the string "null | Kiosk Time Out".
+        attendance.notes = todayRecord.notes
+          ? `${todayRecord.notes} | Kiosk Time Out`
+          : 'Kiosk Time Out';
+      }
+
+      await window.api.recordAttendance(attendance);
+
+      setFeedback({
+        type: 'success',
+        message: action === 'check_in' ? 'Time in recorded' : 'Time out recorded',
+        employeeName: `${employee.first_name} ${employee.last_name}`,
+        time: nowTime
+      });
+      setStep('RESULT');
+    } catch (error) {
+      setFeedback({ type: 'error', message: error.message });
+      setStep('RESULT');
+    }
+
+    scheduleReset();
+  };
+  const processPinChange = async () => {
+    setStep('PROCESSING');
+
+    try {
+      const fullCompanyId = `EMP-${employeeId}`;
+      const verifyResult = await window.api.verifyEmployeePin(fullCompanyId, pin);
+      if (!verifyResult.success) {
+        throw new Error('Invalid old PIN');
+      }
+
+      const employee = verifyResult.employee;
+      const updateResult = await window.api.updateEmployeePin(employee.id, newPin);
+      if (!updateResult.success) throw new Error(updateResult.message);
+
+      setFeedback({
+        type: 'success',
+        message: 'PIN changed',
+        employeeName: 'Use the new PIN next time.',
+        time: ''
+      });
+      setStep('RESULT');
+    } catch (error) {
+      setFeedback({ type: 'error', message: error.message });
+      setStep('RESULT');
+    }
+
+    scheduleReset();
+  };
+
+  const handleExitKiosk = async (event) => {
+    event.preventDefault();
+    setIsVerifying(true);
+    setExitError('');
+
+    try {
+      if (!adminPassword) {
+        throw new Error('Password is required');
+      }
+
+      const result = await window.api.loginUser(user.email, adminPassword);
+      if (!result.success) {
+        throw new Error(result.error || 'Invalid password');
+      }
+
+      navigate('/dashboard');
+    } catch (error) {
+      console.error('Kiosk exit error:', error);
+      setExitError(error.message);
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      // The only way out of a screen with no chrome. Both cases of the key, so
+      // it works whether or not Caps Lock is on.
+      if (event.ctrlKey && event.shiftKey && (event.key === 'Q' || event.key === 'q')) {
+        event.preventDefault();
+        setShowExitModal(true);
+        return;
+      }
+
+      // While the exit dialog is up the digits belong to the password field. The
+      // old handler fed them to the keypad behind it as well, and Enter both
+      // submitted the form and advanced the hidden flow.
+      if (showExitModal || step === 'PROCESSING' || step === 'RESULT') return;
+
+      if (event.key >= '0' && event.key <= '9') {
+        handleKeyPress(Number(event.key));
+      } else if (event.key === 'Backspace') {
+        handleClear();
+      } else if (event.key === 'Enter') {
+        handleEnter();
+      }
     };
 
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [step, employeeId, pin, newPin, confirmPin, mode, showExitModal]);
 
-    // Exit Kiosk Handler
-    useEffect(() => {
-        const handleKeyDown = (e) => {
-            // Create a secret combination to exit, e.g., Ctrl + Shift + Q
-            if (e.ctrlKey && e.shiftKey && e.key === 'Q') {
-                setShowExitModal(true);
-            }
-            // Also support keyboard input for numbers
-            if (step !== 'PROCESSING' && step !== 'RESULT') {
-                if (e.key >= '0' && e.key <= '9') {
-                    handleKeyPress(parseInt(e.key));
-                } else if (e.key === 'Backspace') {
-                    handleClear();
-                } else if (e.key === 'Enter') {
-                    handleEnter();
-                }
-            }
-        };
-
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [step, employeeId, pin, newPin, confirmPin, mode, navigate]);
-
-    const getStepTitle = () => {
-        if (step === 'ID') return 'Enter Employee ID';
-        if (step === 'PIN') return 'Enter Secure PIN';
-        if (step === 'OLD_PIN') return 'Enter Current PIN';
-        if (step === 'NEW_PIN') return 'Enter New PIN';
-        if (step === 'CONFIRM_PIN') return 'Confirm New PIN';
-        return '';
-    };
-
-    const getDisplayValue = () => {
-        if (step === 'ID') {
-            return (
-                <span className="flex items-center justify-center gap-1">
-                    <span className="text-slate-500">EMP-</span>
-                    <span>{employeeId || <span className="text-slate-600 opacity-50">######</span>}</span>
-                </span>
-            );
-        }
-        if (step === 'PIN' || step === 'OLD_PIN') return pin ? '•'.repeat(pin.length) : <span className="text-slate-600">PIN Code</span>;
-        if (step === 'NEW_PIN') return newPin ? '•'.repeat(newPin.length) : <span className="text-slate-600">New PIN</span>;
-        if (step === 'CONFIRM_PIN') return confirmPin ? '•'.repeat(confirmPin.length) : <span className="text-slate-600">Confirm PIN</span>;
-        return '';
-    };
-
-    return (
-        <div className="min-h-screen bg-slate-900 text-white flex flex-col items-center justify-center p-6 relative overflow-hidden">
-            {/* Background Decor */}
-            <div className="absolute top-0 left-0 w-full h-full overflow-hidden z-0">
-                <div className="absolute top-[-10%] right-[-10%] w-[500px] h-[500px] bg-blue-600/20 rounded-full blur-[100px]"></div>
-                <div className="absolute bottom-[-10%] left-[-10%] w-[500px] h-[500px] bg-purple-600/20 rounded-full blur-[100px]"></div>
-            </div>
-
-            <div className="z-10 w-full max-w-md flex flex-col items-center">
-                {/* Clock Header */}
-                <div className="text-center mb-12">
-                    <div className="text-6xl font-bold tracking-tight text-white mb-2 font-mono">
-                        {timeString}
-                    </div>
-                    <div className="text-xl text-slate-400 font-light tracking-wide">
-                        {dateString}
-                    </div>
-                </div>
-
-                {/* Dynamic Content Area */}
-                <div className="w-full bg-white/10 backdrop-blur-xl rounded-2xl p-8 border border-white/10 shadow-2xl min-h-[460px] flex flex-col justify-center relative">
-
-                    {/* Toggle Mode Button (Only visible on ID step) */}
-                    {step === 'ID' && !feedback && (
-                        <div className="absolute top-4 right-4">
-                            <button
-                                onClick={() => setMode(mode === 'ATTENDANCE' ? 'CHANGE_PIN' : 'ATTENDANCE')}
-                                className={`text-xs px-3 py-1 rounded-full border transition-colors ${mode === 'CHANGE_PIN'
-                                    ? 'bg-yellow-500/20 border-yellow-500 text-yellow-300 hover:bg-yellow-500/30'
-                                    : 'bg-white/5 border-white/10 text-slate-400 hover:bg-white/10 hover:text-white'
-                                    }`}
-                            >
-                                {mode === 'ATTENDANCE' ? 'Change PIN' : 'Cancel Change'}
-                            </button>
-                        </div>
-                    )}
-
-                    {step === 'PROCESSING' && (
-                        <div className="flex flex-col items-center animate-pulse">
-                            <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-                            <p className="text-lg font-medium">Processing...</p>
-                        </div>
-                    )}
-
-                    {step === 'RESULT' && (
-                        <div className="flex flex-col items-center text-center animate-fade-in">
-                            {feedback.type === 'success' ? (
-                                <>
-                                    <CheckCircle className="w-20 h-20 text-green-400 mb-4" />
-                                    <h2 className="text-2xl font-bold text-white mb-2">{feedback.message}</h2>
-                                    <p className="text-xl text-green-300 mb-4">{feedback.employeeName}</p>
-                                    {feedback.time && <p className="text-slate-400">Recorded at {feedback.time}</p>}
-                                </>
-                            ) : (
-                                <>
-                                    <XCircle className="w-20 h-20 text-red-400 mb-4" />
-                                    <h2 className="text-2xl font-bold text-white mb-2">Error</h2>
-                                    <p className="text-red-300 mb-4">{feedback.message}</p>
-                                    <button
-                                        onClick={resetKiosk}
-                                        className="mt-4 px-6 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm"
-                                    >
-                                        Try Again
-                                    </button>
-                                </>
-                            )}
-                        </div>
-                    )}
-
-                    {step !== 'PROCESSING' && step !== 'RESULT' && (
-                        <div className="flex flex-col gap-6">
-                            <div className="flex items-center justify-between mb-2 mt-4">
-                                <button
-                                    onClick={() => {
-                                        if (step === 'PIN' || step === 'OLD_PIN') {
-                                            setStep('ID');
-                                            setPin('');
-                                        } else if (step === 'NEW_PIN') {
-                                            setStep('OLD_PIN');
-                                            setNewPin('');
-                                        } else if (step === 'CONFIRM_PIN') {
-                                            setStep('NEW_PIN');
-                                            setConfirmPin('');
-                                        }
-                                    }}
-                                    className={`text-sm flex items-center gap-1 ${step !== 'ID' ? 'text-slate-300 hover:text-white' : 'invisible'}`}
-                                >
-                                    ← Back
-                                </button>
-                                <span className="text-sm font-medium text-slate-400 uppercase tracking-wider">
-                                    {getStepTitle()}
-                                </span>
-                                <span className="w-10"></span>
-                            </div>
-
-                            {/* Display Input */}
-                            <div className={`bg-slate-800/50 rounded-xl p-4 text-center border ${mode === 'CHANGE_PIN' ? 'border-yellow-500/50' : 'border-slate-700'}`}>
-                                <span className="text-3xl font-mono tracking-widest text-white">
-                                    {getDisplayValue()}
-                                </span>
-                            </div>
-
-                            {/* Keypad */}
-                            <Keypad
-                                onKeyPress={handleKeyPress}
-                                onClear={handleClear}
-                                onEnter={handleEnter}
-                                showEnter={true}
-                            />
-                        </div>
-                    )}
-                </div>
-
-                {/* Footer */}
-                <div className="mt-8 text-center text-slate-500 text-sm">
-                    <p className="flex items-center justify-center gap-2">
-                        Official Attendance System <span className="w-1 h-1 bg-slate-500 rounded-full"></span> Admin Pro
-                    </p>
-                    <p className="mt-2 text-xs opacity-50">Press Ctrl+Shift+Q to exit kiosk mode</p>
-                </div>
-            </div>
-            {/* Exit Kiosk Password Modal */}
-            {
-                showExitModal && (
-                    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 backdrop-blur-sm">
-                        <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 text-slate-900">
-                            <div className="flex items-center gap-3 mb-4">
-                                <div className="p-3 bg-red-100 rounded-full text-red-600">
-                                    <Lock size={24} />
-                                </div>
-                                <div>
-                                    <h3 className="text-xl font-bold text-gray-900">Exit Kiosk Mode</h3>
-                                    <p className="text-sm text-gray-500">Admin password required</p>
-                                </div>
-                            </div>
-
-                            <form onSubmit={handleExitKiosk}>
-                                <div className="mb-4">
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                                        Admin Password
-                                    </label>
-                                    <input
-                                        type="password"
-                                        value={adminPassword}
-                                        onChange={(e) => setAdminPassword(e.target.value)}
-                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 outline-none transition-all text-slate-900"
-                                        placeholder="Enter password..."
-                                        autoFocus
-                                    />
-                                    {exitError && (
-                                        <p className="mt-2 text-sm text-red-600 flex items-center gap-1">
-                                            <AlertCircle size={14} />
-                                            {exitError}
-                                        </p>
-                                    )}
-                                </div>
-
-                                <div className="flex gap-3 justify-end mt-6">
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            setShowExitModal(false);
-                                            setAdminPassword('');
-                                            setExitError('');
-                                        }}
-                                        className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors font-medium"
-                                    >
-                                        Cancel
-                                    </button>
-                                    <button
-                                        type="submit"
-                                        disabled={isVerifying}
-                                        className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
-                                    >
-                                        {isVerifying ? (
-                                            <>
-                                                <Loader2 size={18} className="animate-spin" />
-                                                Verifying...
-                                            </>
-                                        ) : (
-                                            <>
-                                                Exit Kiosk
-                                            </>
-                                        )}
-                                    </button>
-                                </div>
-                            </form>
-                        </div>
-                    </div>
-                )
-            }
-        </div >
+  /** What the display shows: the ID with its fixed `EMP-` prefix, or dots. */
+  const displayValue = () => {
+    if (step === 'ID') {
+      return (
+        <span className="flex items-center justify-center gap-1">
+          <span className="text-muted-foreground">EMP-</span>
+          <span>{employeeId || <span className="text-muted-foreground opacity-50">######</span>}</span>
+        </span>
+      );
+    }
+    const value = step === 'NEW_PIN' ? newPin : step === 'CONFIRM_PIN' ? confirmPin : pin;
+    const placeholder =
+      step === 'NEW_PIN' ? 'New PIN' : step === 'CONFIRM_PIN' ? 'Confirm PIN' : 'PIN code';
+    return value ? '•'.repeat(value.length) : (
+      <span className="text-base text-muted-foreground">{placeholder}</span>
     );
+  };
+
+  const entering = step !== 'PROCESSING' && step !== 'RESULT';
+  return (
+    // `body` is `overflow: hidden` and the kiosk renders outside the sidebar
+    // layout, so it scrolls itself. `justify-center-safe` is `justify-content:
+    // safe center`: the clock, the 460px panel and the footer add up past a
+    // short window, and plain `justify-center` would clip the clock away with
+    // no way to scroll up to it.
+    <div className="relative flex h-full flex-col items-center justify-center-safe overflow-y-auto p-6">
+      {/* Two blurred blooms, kept from the original: this is the one screen with
+          no chrome around it, and the glass panel needs something behind it. */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
+        <div className="absolute right-[-10%] top-[-10%] h-[500px] w-[500px] rounded-full bg-[rgb(34_197_94/0.16)] blur-[100px]" />
+        <div className="absolute bottom-[-10%] left-[-10%] h-[500px] w-[500px] rounded-full bg-[rgb(96_165_250/0.14)] blur-[100px]" />
+      </div>
+
+      <div className="relative z-10 flex w-full max-w-md flex-col items-center">
+        <div className="mb-8 text-center">
+          {/* No live region: this ticks every second, and announcing it would
+              talk over everything else on the screen. */}
+          <p className="tnum font-mono text-5xl font-bold tracking-tight sm:text-6xl">
+            {timeString}
+          </p>
+          <p className="page-subtitle mt-2 text-base">{dateString}</p>
+        </div>
+
+        <div className="card relative flex min-h-[460px] w-full flex-col justify-center p-6 sm:p-8">
+          {step === 'ID' && !feedback && (
+            <button
+              type="button"
+              onClick={() => {
+                setMode(mode === 'ATTENDANCE' ? 'CHANGE_PIN' : 'ATTENDANCE');
+                setHint('');
+                setPin('');
+                setNewPin('');
+                setConfirmPin('');
+              }}
+              className={`btn btn-sm absolute right-4 top-4 ${
+                mode === 'CHANGE_PIN' ? 'btn-secondary' : 'btn-ghost'
+              }`}
+            >
+              <KeyRound size={14} aria-hidden="true" />
+              {mode === 'ATTENDANCE' ? 'Change PIN' : 'Cancel change'}
+            </button>
+          )}
+          {step === 'PROCESSING' && (
+            <div className="flex flex-col items-center gap-4" role="status" aria-live="polite">
+              <span className="spinner spinner-lg text-accent" aria-hidden="true" />
+              <p className="text-base">Checking…</p>
+            </div>
+          )}
+
+          {step === 'RESULT' && feedback && (
+            <div
+              className="fade-in flex flex-col items-center gap-3 text-center"
+              role={feedback.type === 'success' ? 'status' : 'alert'}
+              aria-live={feedback.type === 'success' ? 'polite' : 'assertive'}
+            >
+              {feedback.type === 'success' ? (
+                <>
+                  <span className="kpi-icon h-16 w-16 bg-[rgb(34_197_94/0.14)] text-accent">
+                    <CheckCircle size={36} aria-hidden="true" />
+                  </span>
+                  <h2 className="section-title text-xl">{feedback.message}</h2>
+                  <p className="text-lg text-accent">{feedback.employeeName}</p>
+                  {feedback.time && (
+                    <p className="text-sm text-muted-foreground">
+                      Recorded at {formatStoredTime(feedback.time)}
+                    </p>
+                  )}
+                </>
+              ) : (
+                <>
+                  <span className="kpi-icon h-16 w-16 bg-[rgb(239_68_68/0.14)] text-destructive">
+                    <XCircle size={36} aria-hidden="true" />
+                  </span>
+                  <h2 className="section-title text-xl">Not recorded</h2>
+                  <p className="text-sm text-destructive">{feedback.message}</p>
+                  <button type="button" onClick={resetKiosk} className="btn btn-outline mt-2">
+                    Try again
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
+          {entering && (
+            <div className="flex flex-col gap-5">
+              <div className="mt-8 flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={handleBack}
+                  className={`btn btn-ghost btn-sm ${step === 'ID' ? 'invisible' : ''}`}
+                  disabled={step === 'ID'}
+                >
+                  <ChevronLeft size={15} aria-hidden="true" />
+                  Back
+                </button>
+                <h1 className="eyebrow">{STEP_TITLE[step]}</h1>
+                <span className="w-[76px]" aria-hidden="true" />
+              </div>
+
+              <div
+                className={`surface p-4 text-center ${
+                  mode === 'CHANGE_PIN' ? 'border-warning' : ''
+                }`}
+              >
+                <span className="font-mono text-3xl tracking-widest">{displayValue()}</span>
+              </div>
+
+              {hint && (
+                <p className="error-text justify-center" role="alert">
+                  <AlertCircle size={13} aria-hidden="true" />
+                  {hint}
+                </p>
+              )}
+
+              <Keypad
+                onKeyPress={handleKeyPress}
+                onClear={handleClear}
+                onEnter={handleEnter}
+                showEnter
+              />
+            </div>
+          )}
+
+        </div>
+        <div className="mt-7 text-center">
+          <p className="text-sm text-muted-foreground">Official attendance system · Admin Pro</p>
+          <p className="help-text mt-1 justify-center">
+            Press <span className="kbd">Ctrl</span>
+            <span className="kbd">Shift</span>
+            <span className="kbd">Q</span> to leave kiosk mode
+          </p>
+        </div>
+      </div>
+      {showExitModal && (
+        <div
+          className="modal-backdrop"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) closeExit();
+          }}
+        >
+          <div
+            ref={exitRef}
+            tabIndex={-1}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="exit-kiosk-title"
+            className="modal-panel max-w-md"
+          >
+            <div className="flex items-start gap-3 border-b border-[rgb(248_250_252/0.1)] px-5 py-4">
+              <span className="kpi-icon bg-[rgb(239_68_68/0.14)] text-destructive">
+                <Lock size={20} aria-hidden="true" />
+              </span>
+              <div className="min-w-0">
+                <h2 id="exit-kiosk-title" className="section-title">
+                  Leave kiosk mode
+                </h2>
+                <p className="page-subtitle mt-0.5">An admin password is required</p>
+              </div>
+            </div>
+            <form onSubmit={handleExitKiosk}>
+              <div className="px-5 py-4">
+                <label htmlFor="exit-password" className="label label-required">
+                  Admin password
+                </label>
+                <input
+                  id="exit-password"
+                  type="password"
+                  value={adminPassword}
+                  onChange={(event) => setAdminPassword(event.target.value)}
+                  className={`input ${exitError ? 'input-invalid' : ''}`}
+                  placeholder="Password for this account"
+                  autoComplete="current-password"
+                  data-autofocus
+                  aria-invalid={exitError ? 'true' : undefined}
+                  aria-describedby={exitError ? 'exit-error' : 'exit-help'}
+                />
+                {exitError ? (
+                  <p id="exit-error" className="error-text" role="alert">
+                    <AlertCircle size={13} aria-hidden="true" />
+                    {exitError}
+                  </p>
+                ) : (
+                  <p id="exit-help" className="help-text">
+                    Verified against {user?.email || 'the signed-in account'}.
+                  </p>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center justify-end gap-2 border-t border-[rgb(248_250_252/0.1)] px-5 py-4">
+                <button
+                  type="button"
+                  onClick={closeExit}
+                  disabled={isVerifying}
+                  className="btn btn-outline"
+                >
+                  Cancel
+                </button>
+                <button type="submit" disabled={isVerifying} className="btn btn-danger">
+                  {isVerifying ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" aria-hidden="true" />
+                      Verifying…
+                    </>
+                  ) : (
+                    'Leave kiosk'
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 };
 
 export default AttendanceKiosk;

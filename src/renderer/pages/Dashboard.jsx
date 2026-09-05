@@ -1,238 +1,257 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
+import { AlertTriangle, BarChart3, RefreshCw } from 'lucide-react';
 import OverviewCards from '../components/Dashboard/OverviewCards';
 import AttendanceChart from '../components/Attendance/AttendanceChart';
 import PayrollSummary from '../components/Payroll/PayrollSummary';
 import DashboardService from '../services/dashboardService';
-import { Loader2, Download, BarChart3 } from 'lucide-react';
+import { manilaDateLabel } from '../utils/manila';
+
+/** Peso, no centavos — these are headline figures, not payslip lines. */
+const pesos = (amount) =>
+  new Intl.NumberFormat('en-PH', {
+    style: 'currency',
+    currency: 'PHP',
+    maximumFractionDigits: 0
+  }).format(amount || 0);
 
 const Dashboard = () => {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     loadDashboardData();
   }, []);
 
-  const loadDashboardData = async () => {
+  // `silent` keeps the rendered figures on screen while they are re-fetched,
+  // so the refresh control does not blank the page it was pressed on.
+  const loadDashboardData = async ({ silent = false } = {}) => {
     try {
-      setLoading(true);
-      // NOTE: The console.error in the catch block of DashboardService.js (not shown)
-      // indicates the actual source of the 'name' error is there.
-      // This try/catch handles if the entire service call fails.
+      if (silent) setRefreshing(true);
+      else setLoading(true);
+      setError(null);
+
       const data = await DashboardService.getDashboardStats();
       setStats(data);
     } catch (err) {
-      // The original error: TypeError: Cannot read properties of undefined (reading 'name')
-      // is logged here. We set a generic user-friendly error message.
-      setError('Failed to load dashboard data. Please check the service implementation.');
       console.error(err);
+      setError('Could not load the dashboard. The local database may be unavailable.');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  };
-
-  const handleGenerateReport = () => {
-
-    // Implement report generation
-  };
-
-  const handleViewAnalytics = () => {
-
-    // Implement analytics view
   };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-96">
-        <div className="text-center">
-          <Loader2 className="h-8 w-8 animate-spin text-blue-500 mx-auto mb-4" />
-          <p className="text-gray-600">Loading dashboard data...</p>
+      <div className="flex h-96 items-center justify-center">
+        <div className="flex flex-col items-center gap-4" role="status" aria-live="polite">
+          <span className="spinner spinner-lg text-accent" aria-hidden="true" />
+          <p className="text-sm text-muted-foreground">Loading dashboard…</p>
         </div>
       </div>
     );
   }
-
   if (error) {
     return (
-      <div className="flex items-center justify-center h-96">
-        <div className="text-center">
-          <div className="text-red-500 mb-4">⚠️</div>
-          <p className="text-gray-600 mb-4">{error}</p>
-          <button
-            onClick={loadDashboardData}
-            className="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600"
-          >
-            Retry
-          </button>
+      <div className="page">
+        <div className="alert alert-danger" role="alert">
+          <AlertTriangle size={18} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <div className="flex-1">
+            <p className="font-medium">Dashboard unavailable</p>
+            <p className="mt-1 text-muted-foreground">{error}</p>
+            <button
+              type="button"
+              onClick={() => loadDashboardData()}
+              className="btn btn-outline btn-sm mt-3"
+            >
+              <RefreshCw size={15} aria-hidden="true" />
+              Retry
+            </button>
+          </div>
         </div>
       </div>
     );
   }
 
-  // Define fallback value for totalEmployees based on data, defaulting to 1 for division
-  const totalEmployees = stats?.totalEmployees || 1;
+  const headcount = stats?.totalEmployees || 0;
+  const pendingPayroll = stats?.payrollSummary?.pending || 0;
+  const attendanceRate = stats?.attendancePercentage || 0;
+
+  const quickStats = [
+    { label: 'Departments', value: stats?.totalDepartments || 0 },
+    {
+      label: 'Present today',
+      value: `${attendanceRate.toFixed(1)}%`,
+      tone: attendanceRate >= 90 ? 'text-accent' : 'text-warning'
+    },
+    { label: 'Payroll this month', value: pesos(stats?.payrollSummary?.total) },
+    {
+      label: 'Payroll pending',
+      value: pendingPayroll,
+      tone: pendingPayroll > 0 ? 'text-warning' : 'text-accent'
+    }
+  ];
+
+  const topDepartments = [...(stats?.departmentStats || [])]
+    .sort((a, b) => (b.count || 0) - (a.count || 0))
+    .slice(0, 4);
 
   return (
-    <div className="space-y-4">
-      {/* Welcome Banner */}
-      <div className="bg-linear-to-r from-blue-50 to-indigo-50 rounded-2xl p-3 border border-blue-100">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-l md:text-xl font-bold text-gray-900">
-              Welcome back, Administrator
-            </h1>
-            <p className="text-sm text-gray-600 mt-2">
-              Here's what's happening with your company today.
-              You have {stats?.payrollSummary?.pending || 0} pending payroll items to review.
-            </p>
-          </div>
-          <div className="flex gap-3">
-            <button
-              onClick={handleGenerateReport}
-              className="flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold hover:bg-blue-700 transition-colors"
-            >
-              <Download size={18} />
-              Generate Report
-            </button>
-            <button
-              onClick={handleViewAnalytics}
-              className="flex items-center gap-2 border border-gray-300 text-gray-700 px-6 py-3 rounded-xl font-semibold hover:bg-gray-50 transition-colors"
-            >
-              <BarChart3 size={18} />
-              View Analytics
-            </button>
-          </div>
+    <div className="page">
+      {/* The page heading doubles as the greeting the old gradient banner
+          carried. Its two buttons were empty functions; "Generate Report" had
+          no report to generate and is gone, and "View Analytics" is now the
+          route it named. */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h2 className="page-title">Welcome back, Administrator</h2>
+          <p className="page-subtitle mt-1">
+            {manilaDateLabel()} ·{' '}
+            {headcount === 1 ? '1 employee' : `${headcount} employees`} on record ·{' '}
+            {pendingPayroll === 0
+              ? 'no payroll waiting'
+              : `${pendingPayroll} payroll ${pendingPayroll === 1 ? 'item' : 'items'} to review`}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => loadDashboardData({ silent: true })}
+            disabled={refreshing}
+            className="btn btn-outline btn-sm"
+          >
+            <RefreshCw
+              size={15}
+              aria-hidden="true"
+              className={refreshing ? 'animate-spin' : undefined}
+            />
+            {refreshing ? 'Refreshing…' : 'Refresh'}
+          </button>
+          <Link to="/analytics" className="btn btn-primary btn-sm">
+            <BarChart3 size={15} aria-hidden="true" />
+            View Analytics
+          </Link>
         </div>
       </div>
 
-      {/* Overview Cards (Assuming OverviewCards handles its own fallbacks based on the 'stats' prop) */}
       <OverviewCards stats={stats} />
 
-      {/* Main Grid Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column - Charts */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* Charts (Assuming AttendanceChart and PayrollSummary handle data checks internally) */}
-          <AttendanceChart weeklyAttendance={stats?.weeklyAttendance || []} />
-          <PayrollSummary payrollData={stats?.payrollSummary} />
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <div className="flex flex-col gap-4 xl:col-span-2">
+          {/* Both of these own their queries, including their own refresh and
+              error states, so neither takes data from `stats`. */}
+          <AttendanceChart />
+          <PayrollSummary />
         </div>
 
-        {/* Right Column - Quick Stats */}
-        <div className="space-y-6">
-          {/* Quick Stats */}
-          <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <h3 className="font-bold text-lg mb-4">Quick Stats</h3>
-            <div className="space-y-4">
-              {[
-                {
-                  label: 'Total Departments',
-                  value: stats?.totalDepartments || 0,
-                  color: 'text-gray-900'
-                },
-                {
-                  label: 'Avg. Attendance',
-                  value: `${stats?.attendancePercentage?.toFixed(1) || 0}%`,
-                  color: (stats?.attendancePercentage || 0) >= 90 ? 'text-green-600' : 'text-yellow-600'
-                },
-                {
-                  label: 'Monthly Revenue',
-                  value: new Intl.NumberFormat('en-US', {
-                    style: 'currency',
-                    currency: 'USD',
-                    minimumFractionDigits: 0
-                  }).format(stats?.monthlyRevenue || 0),
-                  color: 'text-blue-600'
-                },
-              ].map((stat, index) => (
-                <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                  <span className="text-gray-600">{stat.label}</span>
-                  <span className={`font-bold ${stat.color}`}>{stat.value}</span>
+        <div className="flex flex-col gap-4">
+          <section className="card p-5" aria-labelledby="quick-stats-heading">
+            <h3 id="quick-stats-heading" className="section-title">
+              Quick stats
+            </h3>
+            <dl className="mt-3 flex flex-col gap-2">
+              {quickStats.map((stat) => (
+                <div key={stat.label} className="surface flex items-center justify-between px-3 py-2.5">
+                  <dt className="text-sm text-muted-foreground">{stat.label}</dt>
+                  <dd
+                    className={`font-display text-sm font-semibold tabular-nums ${
+                      stat.tone || 'text-foreground'
+                    }`}
+                  >
+                    {stat.value}
+                  </dd>
                 </div>
               ))}
-            </div>
-          </div>
+            </dl>
+          </section>
 
-          {/* Recent Activities */}
-          <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-bold text-lg">Recent Activities</h3>
-              <button className="text-sm text-blue-600 hover:text-blue-700 font-medium">
-                View All
-              </button>
-            </div>
-            <div className="space-y-4">
-              {/* Check if recentActivities is an array and has length, otherwise display fallback */}
-              {stats?.recentActivities?.length ? (
-                stats.recentActivities.map((activity, index) => (
-                  <div key={index} className="flex items-start gap-3 p-3 hover:bg-gray-50 rounded-lg transition-colors">
-                    <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
-                      <span className="text-blue-600 font-bold text-sm">
-                        {activity.initials || '??'}
+          <section className="card p-5" aria-labelledby="recent-activity-heading">
+            <h3 id="recent-activity-heading" className="section-title">
+              Recent activity
+            </h3>
+            {stats?.recentActivities?.length ? (
+              <ul className="mt-3 flex flex-col gap-1">
+                {stats.recentActivities.map((activity, index) => (
+                  <li
+                    key={`${activity.user}-${activity.time}-${index}`}
+                    className="stagger-row flex items-start gap-3 rounded-control px-2 py-2 transition-colors duration-150 hover:bg-[rgb(248_250_252/0.05)]"
+                    style={{ '--i': index }}
+                  >
+                    <span className="avatar h-8 w-8 text-xs">
+                      {activity.initials || '—'}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm">
+                        <span className="font-medium">{activity.user || 'Unknown user'}</span>{' '}
+                        {activity.action || 'performed an action'}
                       </span>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm truncate">
-                        <span className="font-semibold">{activity.user || 'Unknown User'}</span> {activity.action || 'performed an action'}
-                      </p>
-                      <p className="text-xs text-gray-500 mt-1">{activity.time || 'N/A'}</p>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="text-center text-gray-500 py-4">No recent activities available.</div>
-              )}
-            </div>
-          </div>
+                      <span className="mt-0.5 block text-xs text-muted-foreground">
+                        {activity.time}
+                      </span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                No activity recorded yet.
+              </p>
+            )}
+          </section>
 
-          {/* Department Summary */}
-          <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <h3 className="font-bold text-lg mb-4">Top Departments</h3>
-            <div className="space-y-3">
-              {/* Check if departmentStats is an array and has length, otherwise display fallback */}
-              {stats?.departmentStats?.length ? (
-                stats.departmentStats
-                  .sort((a, b) => b.count - a.count)
-                  .slice(0, 4)
-                  .map((dept, index) => {
-                    const deptCount = dept.count || 0;
-                    const departmentName = dept.name || 'Unknown Department';
-                    const avgSalary = Math.round(dept.avgSalary || 0).toLocaleString();
-                    const percentage = totalEmployees > 0 ? ((deptCount / totalEmployees) * 100).toFixed(1) : 0;
+          <section className="card p-5" aria-labelledby="top-departments-heading">
+            <h3 id="top-departments-heading" className="section-title">
+              Top departments
+            </h3>
+            {topDepartments.length ? (
+              <ul className="mt-3 flex flex-col gap-4">
+                {topDepartments.map((dept) => {
+                  const count = dept.count || 0;
+                  const percentage = headcount > 0 ? (count / headcount) * 100 : 0;
 
-                    return (
-                      <div key={index} className="flex items-center justify-between">
-                        <div className="flex-1">
-                          <div className="flex justify-between mb-1">
-                            <span className="text-sm font-medium text-gray-700">{departmentName}</span>
-                            <span className="text-sm font-bold">{deptCount} {deptCount === 1 ? 'employee' : 'employees'}</span>
-                          </div>
-                          <div className="w-full bg-gray-200 rounded-full h-2">
-                            <div
-                              className="bg-blue-500 h-2 rounded-full"
-                              style={{
-                                // Ensure percentage doesn't exceed 100%
-                                width: `${Math.min(100, percentage)}%`
-                              }}
-                            ></div>
-                          </div>
-                          <div className="flex justify-between mt-1">
-                            <span className="text-xs text-gray-500">
-                              Avg. Annual Salary: ₱{avgSalary}
-                            </span>
-                            <span className="text-xs text-gray-500">
-                              {percentage}%
-                            </span>
-                          </div>
-                        </div>
+                  return (
+                    <li key={dept.name || 'unknown'}>
+                      <div className="flex items-baseline justify-between gap-3">
+                        <span className="truncate-1 text-sm font-medium">
+                          {dept.name || 'Unassigned'}
+                        </span>
+                        <span className="shrink-0 font-display text-sm tabular-nums">
+                          {count} {count === 1 ? 'employee' : 'employees'}
+                        </span>
                       </div>
-                    );
-                  })
-              ) : (
-                <div className="text-center text-gray-500 py-4">No employee available yet.</div>
-              )}
-            </div>
-          </div>
+                      <div
+                        className="progress mt-2"
+                        role="progressbar"
+                        aria-valuenow={Math.round(percentage)}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-label={`${dept.name || 'Unassigned'} share of headcount`}
+                      >
+                        <div
+                          className="progress-bar"
+                          style={{ width: `${Math.min(100, percentage)}%` }}
+                        />
+                      </div>
+                      <div className="mt-1.5 flex items-baseline justify-between gap-3 text-xs text-muted-foreground">
+                        {/* `departments::get_all` averages `employees.salary`,
+                            which is the monthly basic rate. Both dashboard
+                            labels used to read "Avg. Annual Salary". */}
+                        <span>Avg. monthly {pesos(dept.avgSalary)}</span>
+                        <span className="tabular-nums">{percentage.toFixed(1)}%</span>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                No departments yet.
+              </p>
+            )}
+          </section>
         </div>
       </div>
     </div>

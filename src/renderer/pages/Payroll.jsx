@@ -1,25 +1,145 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  PhilippinePeso, Download, Printer, Send, CheckCircle, Clock,
-  TrendingUp, FileText, Calculator, Banknote, Receipt, AlertCircle,
-  CalendarDays, ChevronDown, ChevronUp
+  AlertCircle,
+  AlertTriangle,
+  Banknote,
+  Calculator,
+  CalendarDays,
+  CheckCircle,
+  ChevronDown,
+  ChevronUp,
+  Clock,
+  Download,
+  FileText,
+  Loader2,
+  PhilippinePeso,
+  Receipt,
+  X
 } from 'lucide-react';
 import PhilippinePayrollCalculator from '../utils/PhilippinePayrollCalculator';
+import ConfirmDialog from '../components/ui/ConfirmDialog';
+import { useDialog } from '../hooks/useDialog';
+import { downloadCsv, toCsv } from '../utils/csv';
+import { formatStoredDate, manilaMonth, manilaYear } from '../utils/manila';
+
+/** Month names, for the period picker and every "September 2026" label. */
+const MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
+
+/** The three runs this page understands, and the days each one covers. */
+const CUTOFFS = [
+  { value: 'First Half', label: 'First half', detail: '1st – 10th', workingDays: 12 },
+  { value: 'Second Half', label: 'Second half', detail: '11th – 25th', workingDays: 12 },
+  { value: 'Full Month', label: 'Full month', detail: 'Whole month', workingDays: 24 }
+];
+
+const TABS = [
+  { value: 'summary', label: 'Summary', Icon: FileText },
+  { value: 'details', label: 'Payroll records', Icon: Receipt },
+  { value: 'process', label: 'Process payroll', Icon: Calculator }
+];
+
+/**
+ * Status → badge and icon, replacing `getStatusColor`/`getStatusIcon`. Both
+ * returned light-theme Tailwind pairs; the icon stays because a status must
+ * never rest on colour alone.
+ */
+const STATUS_STYLE = {
+  Paid: { badge: 'badge-accent', Icon: CheckCircle },
+  Pending: { badge: 'badge-warning', Icon: Clock },
+  Processing: { badge: 'badge-info', Icon: Clock }
+};
+/** `₱12,345.00`. The `Number(…) || 0` keeps a null column out of `₱NaN`. */
+const formatCurrency = (amount) =>
+  new Intl.NumberFormat('en-PH', {
+    style: 'currency',
+    currency: 'PHP',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(Number(amount) || 0);
+
+/** The same guard for the running totals: one `undefined` poisons a `reduce`. */
+const num = (value) => Number(value) || 0;
+
+/**
+ * The `breakdown` column holds whatever JSON the run that wrote the row
+ * produced. A malformed one used to throw from inside a `reduce` during render,
+ * which takes the whole page down rather than one figure.
+ *
+ * The second `JSON.parse` is for rows written while the Rust insert re-encoded
+ * the already-stringified breakdown, so the column held a quoted JSON string
+ * rather than an object. New rows parse on the first pass.
+ */
+const parseBreakdown = (value) => {
+  if (!value) return null;
+  try {
+    let parsed = typeof value === 'string' ? JSON.parse(value) : value;
+    if (typeof parsed === 'string') parsed = JSON.parse(parsed);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+/** One employee-side contribution out of a stored breakdown. */
+const employeeShare = (breakdown, key) => num(breakdown?.deductions?.mandatory?.[key]?.employee);
+
+const initials = (name) =>
+  String(name || '')
+    .trim()
+    .split(/\s+/)
+    .map((part) => part[0] ?? '')
+    .join('')
+    .slice(0, 2)
+    .toUpperCase() || '—';
+
+const pad = (value) => String(value).padStart(2, '0');
+
+/** Last day of a 1-based month: day zero of the next one. */
+const monthEndDay = (year, month) => new Date(year, month, 0).getDate();
+
+const periodLabel = ({ year, month }) => `${MONTHS[month - 1]} ${year}`;
+
+/** Two years back and two forward, as the original dropdown offered. */
+const YEARS = Array.from({ length: 5 }, (_, index) => manilaYear() - 2 + index);
 
 const Payroll = () => {
   const [payrollData, setPayrollData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedPeriod, setSelectedPeriod] = useState({
-    year: new Date().getFullYear(),
-    month: new Date().getMonth() + 1,
-    cutoffType: 'First Half' // 'First Half', 'Second Half', or 'Full Month'
+    // Was `new Date().getFullYear()` and `getMonth() + 1` — the UTC year and
+    // month. On the 1st, before 08:00 Manila, both still name the month that
+    // ended, so the page opened on the previous cutoff.
+    year: manilaYear(),
+    month: manilaMonth(),
+    cutoffType: 'First Half'
   });
-  const [viewMode, setViewMode] = useState('summary'); // 'summary', 'details', 'process'
+  const [viewMode, setViewMode] = useState('summary');
   const [selectedPayroll, setSelectedPayroll] = useState(null);
   const [employees, setEmployees] = useState([]);
   const [processing, setProcessing] = useState(false);
   const [cutoffAttendance, setCutoffAttendance] = useState([]);
   const [showCutoffDetails, setShowCutoffDetails] = useState(false);
+  const [confirmRun, setConfirmRun] = useState(false);
+  // Four `alert()` calls used to report the outcome of a run. A dialog drawn by
+  // the operating system blocks the webview and cannot say which cutoff it is
+  // talking about.
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  const detailRef = useDialog(Boolean(selectedPayroll), () => setSelectedPayroll(null));
+
+  const flashError = (message) => {
+    setError(message);
+    setTimeout(() => setError(''), 5000);
+  };
+
+  const flashSuccess = (message) => {
+    setSuccess(message);
+    setTimeout(() => setSuccess(''), 3000);
+  };
 
   useEffect(() => {
     loadEmployees();
@@ -31,10 +151,11 @@ const Payroll = () => {
 
   const loadEmployees = async () => {
     try {
-      const data = await window.electronAPI.getAllEmployees();
+      const data = await window.api.getAllEmployees();
       setEmployees(data || []);
-    } catch (error) {
-      console.error('Error loading employees:', error);
+    } catch (loadError) {
+      console.error('Error loading employees:', loadError);
+      flashError('Could not read the employee list.');
     }
   };
 
@@ -43,17 +164,22 @@ const Payroll = () => {
       setLoading(true);
       let data;
       if (selectedPeriod.cutoffType === 'Full Month') {
-        data = await window.electronAPI.getAllPayroll();
+        // The whole table, as before: a monthly run is filed against the
+        // calendar month rather than one of the two cutoff windows, so there is
+        // no cutoff to match it on.
+        data = await window.api.getAllPayroll();
       } else {
-        data = await window.electronAPI.getPayrollByCutoff(
+        data = await window.api.getPayrollByCutoff(
           selectedPeriod.year,
           selectedPeriod.month,
           selectedPeriod.cutoffType
         );
       }
       setPayrollData(data || []);
-    } catch (error) {
-      console.error('Error loading payroll data:', error);
+    } catch (loadError) {
+      console.error('Error loading payroll data:', loadError);
+      setPayrollData([]);
+      flashError('Could not read the payroll records for this period.');
     } finally {
       setLoading(false);
     }
@@ -62,143 +188,220 @@ const Payroll = () => {
   const loadCutoffAttendance = async () => {
     try {
       const isFirstHalf = selectedPeriod.cutoffType === 'First Half';
-      const data = await window.electronAPI.getCutoffAttendance(
+      const data = await window.api.getCutoffAttendance(
         selectedPeriod.year,
         selectedPeriod.month,
         isFirstHalf
       );
       setCutoffAttendance(data || []);
-    } catch (error) {
-      console.error('Error loading cutoff attendance:', error);
+    } catch (loadError) {
+      console.error('Error loading cutoff attendance:', loadError);
       setCutoffAttendance([]);
+      flashError('Could not read the attendance for this cutoff.');
     }
   };
 
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-PH', {
-      style: 'currency',
-      currency: 'PHP',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    }).format(amount);
-  };
-
-  // Calculate full month payroll using available methods
+  /**
+   * The full-month figures for one employee. `employees.salary` is the monthly
+   * basic, which is why the daily rate is that over 24 working days.
+   *
+   * `workingDays` and `dailyRate` are now part of the returned breakdown. The
+   * daily rate was computed and thrown away, and the payslip modal reads both —
+   * which is why a monthly payslip showed "₱NaN" against Daily Rate.
+   */
   const calculateMonthlyPayrollForEmployee = (employee) => {
-    const basicSalary = employee.salary || 0;
+    const basicSalary = num(employee.salary);
     const allowances = 0;
     const otherDeductions = 0;
 
-    // Calculate monthly payroll breakdown using available methods
-    const dailyRate = basicSalary / 24; // 24 working days per month
     const monthlyGross = basicSalary + allowances;
-
-    // Calculate mandatory deductions (monthly)
-    const mandatoryDeductions = PhilippinePayrollCalculator.calculateMandatoryDeductions(basicSalary, false); // false = full month
-
-    // Calculate income tax (monthly)
+    const mandatory = PhilippinePayrollCalculator.calculateMandatoryDeductions(basicSalary, false);
     const incomeTax = PhilippinePayrollCalculator.calculateMonthlyIncomeTax(monthlyGross);
-
-    const totalDeductions = mandatoryDeductions.total + incomeTax + otherDeductions;
-    const netSalary = monthlyGross - totalDeductions;
+    const totalDeductions = mandatory.total + incomeTax + otherDeductions;
 
     return {
+      workingDays: 24,
+      dailyRate: basicSalary / 24,
       basicSalary,
       allowances,
       grossSalary: monthlyGross,
       deductions: {
         mandatory: {
           sss: {
-            employee: mandatoryDeductions.sss.employeeShare,
-            employer: mandatoryDeductions.sss.employerShare,
-            total: mandatoryDeductions.sss.employeeShare + mandatoryDeductions.sss.employerShare
+            employee: mandatory.sss.employeeShare,
+            employer: mandatory.sss.employerShare,
+            total: mandatory.sss.employeeShare + mandatory.sss.employerShare
           },
           philhealth: {
-            employee: mandatoryDeductions.philhealth.employeeShare,
-            employer: mandatoryDeductions.philhealth.employerShare,
-            total: mandatoryDeductions.philhealth.total
+            employee: mandatory.philhealth.employeeShare,
+            employer: mandatory.philhealth.employerShare,
+            total: mandatory.philhealth.total
           },
           pagibig: {
-            employee: mandatoryDeductions.pagibig.employeeShare,
-            employer: mandatoryDeductions.pagibig.employerShare,
-            total: mandatoryDeductions.pagibig.total
+            employee: mandatory.pagibig.employeeShare,
+            employer: mandatory.pagibig.employerShare,
+            total: mandatory.pagibig.total
           },
-          total: mandatoryDeductions.total
+          total: mandatory.total
         },
-        incomeTax: incomeTax,
-        otherDeductions: otherDeductions,
+        incomeTax,
+        otherDeductions,
         total: totalDeductions
       },
       employerContributions: {
-        sss: mandatoryDeductions.sss.employerShare,
-        philhealth: mandatoryDeductions.philhealth.employerShare,
-        pagibig: mandatoryDeductions.pagibig.employerShare,
-        total: mandatoryDeductions.sss.employerShare + mandatoryDeductions.philhealth.employerShare + mandatoryDeductions.pagibig.employerShare
+        sss: mandatory.sss.employerShare,
+        philhealth: mandatory.philhealth.employerShare,
+        pagibig: mandatory.pagibig.employerShare,
+        total:
+          mandatory.sss.employerShare +
+          mandatory.philhealth.employerShare +
+          mandatory.pagibig.employerShare
       },
-      netSalary: netSalary
+      netSalary: monthlyGross - totalDeductions
     };
   };
 
-  // Calculate bi-monthly payroll
-  const calculateBiMonthlyPayrollForEmployee = (employee, attendance) => {
-    const monthlySalary = employee.salary || 0;
-    const daysPresent = attendance?.days_present || 0;
-    const workingDays = 12; // Half-month working days
-    const isFirstHalf = selectedPeriod.cutoffType === 'First Half';
-
-    return PhilippinePayrollCalculator.calculateHalfMonthPayroll(
-      monthlySalary,
+  /** One half of the month, pro-rated by days present. */
+  const calculateBiMonthlyPayrollForEmployee = (employee, attendance) =>
+    PhilippinePayrollCalculator.calculateHalfMonthPayroll(
+      num(employee.salary),
       0, // Allowances
       0, // Other deductions
-      workingDays,
-      daysPresent,
-      isFirstHalf
+      12, // Half-month working days
+      attendance?.days_present || 0,
+      selectedPeriod.cutoffType === 'First Half'
     );
+
+  const cutoff = CUTOFFS.find((entry) => entry.value === selectedPeriod.cutoffType) ?? CUTOFFS[0];
+  const activeEmployees = employees.filter((employee) => employee.status === 'Active');
+
+  /**
+   * The rows the process view previews *and* the ones the run writes, so the
+   * two can never disagree. A monthly run covers every active employee; a
+   * half-month run covers whoever `getCutoffAttendance` returned, which is every
+   * active employee with their day count for the window — a count of zero
+   * included, exactly as before.
+   */
+  const previewRows =
+    selectedPeriod.cutoffType === 'Full Month'
+      ? activeEmployees.map((employee) => ({
+          employee,
+          attendance: null,
+          breakdown: calculateMonthlyPayrollForEmployee(employee)
+        }))
+      : cutoffAttendance
+          .map((row) => {
+            const employee = employees.find((candidate) => candidate.id === row.employee_id);
+            if (!employee) return null;
+            return {
+              employee,
+              attendance: row,
+              breakdown: calculateBiMonthlyPayrollForEmployee(employee, row)
+            };
+          })
+          .filter(Boolean);
+
+  /**
+   * `calculateBiMonthlySummary` used to total the half-month preview by running
+   * the calculator over every employee a second time, while the Full Month
+   * column totalled `employees.salary` directly. Both arrive at the same three
+   * figures the preview rows already hold — the monthly breakdown's
+   * `basicSalary` *is* `employee.salary` — so they are summed here once.
+   */
+  const previewTotals = previewRows.reduce(
+    (totals, row) => ({
+      gross: totals.gross + num(row.breakdown.basicSalary),
+      deductions: totals.deductions + num(row.breakdown.deductions.total),
+      net: totals.net + num(row.breakdown.netSalary)
+    }),
+    { gross: 0, deductions: 0, net: 0 }
+  );
+
+  const runPayroll = async () => {
+    setConfirmRun(false);
+    if (selectedPeriod.cutoffType === 'Full Month') {
+      await processMonthlyPayroll();
+    } else {
+      await processBiMonthlyPayroll();
+    }
+  };
+
+  const filedMessage = (count) =>
+    `${count} ${count === 1 ? 'record' : 'records'} filed as Pending.`;
+
+  /**
+   * `payroll` carries `UNIQUE(employee_id, cutoff_start, cutoff_end)` — it did
+   * in the Electron schema too — so re-running a period an employee already has
+   * a record for is rejected by SQLite, not silently duplicated. Awaiting the
+   * inserts in a bare loop meant the first such employee aborted the batch and
+   * put `UNIQUE constraint failed: payroll.employee_id, …` on screen.
+   *
+   * Each insert is attempted on its own now: employees already on file are
+   * counted and reported, everyone else is filed, and any other error still
+   * stops the run. That keeps adding a mid-period hire possible without
+   * clearing the period first.
+   */
+  const isDuplicateRun = (error) =>
+    /UNIQUE constraint failed/i.test(error?.message ?? String(error ?? ''));
+
+  const fileRecords = async (rows, submit) => {
+    let filed = 0;
+    let skipped = 0;
+    for (const row of rows) {
+      try {
+        await submit(row);
+        filed += 1;
+      } catch (insertError) {
+        if (!isDuplicateRun(insertError)) throw insertError;
+        skipped += 1;
+      }
+    }
+    return { filed, skipped };
+  };
+
+  const runSummary = ({ filed, skipped }) => {
+    const filedPart = filedMessage(filed);
+    if (skipped === 0) return filedPart;
+    return `${filedPart} ${skipped} ${
+      skipped === 1 ? 'employee was' : 'employees were'
+    } already on file for this period and left as ${skipped === 1 ? 'it is' : 'they are'}.`;
   };
 
   const processBiMonthlyPayroll = async () => {
     setProcessing(true);
     try {
-      const [year, month] = [selectedPeriod.year, selectedPeriod.month];
-      const isFirstHalf = selectedPeriod.cutoffType === 'First Half';
-      const startDay = isFirstHalf ? '01' : '11';
-      const endDay = isFirstHalf ? '10' : '25';
+      const { year, month, cutoffType } = selectedPeriod;
+      const isFirstHalf = cutoffType === 'First Half';
+      const cutoffStart = `${year}-${pad(month)}-${isFirstHalf ? '01' : '11'}`;
+      const cutoffEnd = `${year}-${pad(month)}-${isFirstHalf ? '10' : '25'}`;
 
-      const cutoff_start = `${year}-${month.toString().padStart(2, '0')}-${startDay}`;
-      const cutoff_end = `${year}-${month.toString().padStart(2, '0')}-${endDay}`;
-
-      // Process each employee with attendance
-      for (const emp of cutoffAttendance) {
-        const employee = employees.find(e => e.id === emp.employee_id);
-        if (!employee) continue;
-
-        const breakdown = calculateBiMonthlyPayrollForEmployee(employee, emp);
-
-        const payrollData = {
-          employee_id: emp.employee_id,
-          cutoff_start,
-          cutoff_end,
-          basic_salary: breakdown.basicSalary,
-          allowances: 0,
-          deductions: breakdown.deductions.total,
-          net_salary: breakdown.netSalary,
-          status: 'Pending',
-          cutoff_type: selectedPeriod.cutoffType,
-          working_days: 12,
-          days_present: emp.days_present || 0,
-          daily_rate: breakdown.dailyRate,
-          breakdown: JSON.stringify(breakdown)
-        };
-
-        await window.electronAPI.processBiMonthlyPayroll(payrollData);
-      }
+      const outcome = await fileRecords(
+        previewRows,
+        ({ employee, attendance, breakdown }) =>
+          window.api.processBiMonthlyPayroll({
+            employee_id: employee.id,
+            cutoff_start: cutoffStart,
+            cutoff_end: cutoffEnd,
+            basic_salary: breakdown.basicSalary,
+            allowances: 0,
+            deductions: breakdown.deductions.total,
+            net_salary: breakdown.netSalary,
+            status: 'Pending',
+            cutoff_type: cutoffType,
+            working_days: 12,
+            days_present: attendance?.days_present || 0,
+            daily_rate: breakdown.dailyRate,
+            breakdown: JSON.stringify(breakdown)
+          })
+      );
 
       await loadPayrollData();
-      alert(`${selectedPeriod.cutoffType} payroll processed successfully!`);
-
-    } catch (error) {
-      console.error('Error processing payroll:', error);
-      alert('Error processing payroll: ' + error.message);
+      flashSuccess(
+        `${cutoff.label} of ${periodLabel(selectedPeriod)} processed — ${runSummary(outcome)}`
+      );
+    } catch (runError) {
+      console.error('Error processing payroll:', runError);
+      flashError(`Error processing payroll: ${runError.message}`);
     } finally {
       setProcessing(false);
     }
@@ -207,975 +410,1206 @@ const Payroll = () => {
   const processMonthlyPayroll = async () => {
     setProcessing(true);
     try {
-      const activeEmployees = employees.filter(emp => emp.status === 'Active');
+      const { year, month } = selectedPeriod;
+      const cutoffStart = `${year}-${pad(month)}-01`;
+      const cutoffEnd = `${year}-${pad(month)}-${pad(monthEndDay(year, month))}`;
 
-      const payrollRecords = activeEmployees.map(employee => {
-        const breakdown = calculateMonthlyPayrollForEmployee(employee);
-
-        return {
+      const outcome = await fileRecords(previewRows, ({ employee, breakdown }) =>
+        window.api.processPayroll({
           employee_id: employee.id,
-          cutoff_start: `${selectedPeriod.year}-${selectedPeriod.month.toString().padStart(2, '0')}-01`,
-          cutoff_end: `${selectedPeriod.year}-${selectedPeriod.month.toString().padStart(2, '0')}-${new Date(selectedPeriod.year, selectedPeriod.month, 0).getDate()}`,
+          cutoff_start: cutoffStart,
+          cutoff_end: cutoffEnd,
           basic_salary: employee.salary,
           allowances: breakdown.allowances,
           deductions: breakdown.deductions.total,
           net_salary: breakdown.netSalary,
           status: 'Pending',
           breakdown: JSON.stringify(breakdown)
-        };
-      });
-
-      // Save to database
-      for (const record of payrollRecords) {
-        await window.electronAPI.processPayroll(record);
-      }
+        })
+      );
 
       await loadPayrollData();
-      alert('Monthly payroll processed successfully!');
-
-    } catch (error) {
-      console.error('Error processing payroll:', error);
-      alert('Error processing payroll: ' + error.message);
+      flashSuccess(`${periodLabel(selectedPeriod)} processed — ${runSummary(outcome)}`);
+    } catch (runError) {
+      console.error('Error processing payroll:', runError);
+      flashError(`Error processing payroll: ${runError.message}`);
     } finally {
       setProcessing(false);
     }
   };
 
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'Paid': return 'bg-green-100 text-green-800';
-      case 'Pending': return 'bg-yellow-100 text-yellow-800';
-      case 'Processing': return 'bg-blue-100 text-blue-800';
-      default: return 'bg-gray-100 text-gray-800';
+  const handleMarkPaid = async (payroll) => {
+    try {
+      // No date argument on purpose: `mark_payroll_as_paid` falls back to
+      // Manila's today, which is what pressing this button means.
+      await window.api.markPayrollAsPaid(payroll.id);
+      await loadPayrollData();
+      flashSuccess(`${payroll.employee_name} marked paid.`);
+    } catch (payError) {
+      console.error('Error marking payroll as paid:', payError);
+      flashError(`Error marking as paid: ${payError.message}`);
     }
   };
 
-  const getStatusIcon = (status) => {
-    switch (status) {
-      case 'Paid': return <CheckCircle size={14} />;
-      case 'Pending': return <Clock size={14} />;
-      case 'Processing': return <Clock size={14} />;
-      default: return null;
-    }
+  // The Export button was inert markup. It exports the records on screen, which
+  // is the set the period controls above it select.
+  const handleExport = () => {
+    if (payrollData.length === 0) return;
+
+    const slug = selectedPeriod.cutoffType.toLowerCase().replace(/\s+/g, '-');
+
+    downloadCsv(
+      `payroll-${selectedPeriod.year}-${pad(selectedPeriod.month)}-${slug}.csv`,
+      toCsv(
+        [
+          'Payroll ID',
+          'Employee',
+          'Position',
+          'Cutoff',
+          'Cutoff start',
+          'Cutoff end',
+          'Days present',
+          'Working days',
+          'Daily rate',
+          'Gross',
+          'Deductions',
+          'Net pay',
+          'Status',
+          'Payment date'
+        ],
+        payrollData.map((payroll) => [
+          payroll.id,
+          payroll.employee_name,
+          payroll.position,
+          payroll.cutoff_type || 'Full Month',
+          payroll.cutoff_start,
+          payroll.cutoff_end,
+          payroll.days_present,
+          payroll.working_days,
+          payroll.daily_rate,
+          num(payroll.basic_salary) + num(payroll.allowances),
+          payroll.deductions,
+          payroll.net_salary,
+          payroll.status,
+          payroll.payment_date || ''
+        ])
+      )
+    );
   };
 
-  // Get months for dropdown
-  const months = [
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December'
+  // One pass instead of seven. The contribution figures each re-parsed every
+  // row's `breakdown` JSON in their own `reduce`.
+  const totals = payrollData.reduce(
+    (sums, payroll) => {
+      const breakdown = parseBreakdown(payroll.breakdown);
+      return {
+        net: sums.net + num(payroll.net_salary),
+        deductions: sums.deductions + num(payroll.deductions),
+        cost: sums.cost + num(payroll.net_salary) + num(payroll.deductions),
+        gross: sums.gross + num(payroll.basic_salary) + num(payroll.allowances),
+        sss: sums.sss + employeeShare(breakdown, 'sss'),
+        philhealth: sums.philhealth + employeeShare(breakdown, 'philhealth'),
+        pagibig: sums.pagibig + employeeShare(breakdown, 'pagibig'),
+        tax: sums.tax + num(breakdown?.deductions?.incomeTax)
+      };
+    },
+    { net: 0, deductions: 0, cost: 0, gross: 0, sss: 0, philhealth: 0, pagibig: 0, tax: 0 }
+  );
+
+  const paidCount = payrollData.filter((payroll) => payroll.status === 'Paid').length;
+  const pendingCount = payrollData.filter((payroll) => payroll.status === 'Pending').length;
+  const recordCount = payrollData.length;
+  const showAttendanceColumns = showCutoffDetails && selectedPeriod.cutoffType !== 'Full Month';
+
+  const tiles = [
+    {
+      label: 'Total net distribution',
+      value: formatCurrency(totals.net),
+      detail: `Across ${recordCount} ${recordCount === 1 ? 'record' : 'records'}`,
+      icon: Banknote,
+      iconClass: 'bg-[rgb(34_197_94/0.14)] text-accent'
+    },
+    {
+      label: 'Total deductions',
+      value: formatCurrency(totals.deductions),
+      detail: 'Tax and mandatory contributions',
+      icon: Receipt,
+      iconClass: 'bg-[rgb(239_68_68/0.14)] text-destructive'
+    },
+    {
+      label: 'Pending approval',
+      value: pendingCount,
+      detail: pendingCount === 0 ? 'Nothing waiting on you' : 'Requires your confirmation',
+      icon: Clock,
+      iconClass: 'bg-[rgb(251_191_36/0.14)] text-warning'
+    },
+    {
+      label: 'Company liability',
+      value: formatCurrency(totals.gross),
+      detail: 'Gross total payroll',
+      icon: PhilippinePeso,
+      iconClass: 'bg-[rgb(96_165_250/0.14)] text-info'
+    }
   ];
 
-  // Get years for dropdown
-  const currentYear = new Date().getFullYear();
-  const years = Array.from({ length: 5 }, (_, i) => currentYear - 2 + i);
-
-  // Calculate summary for bi-monthly payroll preview
-  const calculateBiMonthlySummary = () => {
-    let totalEmployees = 0;
-    let totalNetPay = 0;
-    let totalDeductions = 0;
-    let totalGrossPay = 0;
-
-    cutoffAttendance.forEach(emp => {
-      const employee = employees.find(e => e.id === emp.employee_id);
-      if (employee) {
-        const breakdown = calculateBiMonthlyPayrollForEmployee(employee, emp);
-        totalEmployees++;
-        totalNetPay += breakdown.netSalary;
-        totalDeductions += breakdown.deductions.total;
-        totalGrossPay += breakdown.basicSalary;
-      }
-    });
-
-    return {
-      totalEmployees,
-      totalNetPay,
-      totalDeductions,
-      totalGrossPay
-    };
-  };
-
-  const getMonthName = (year, month) => {
-    const date = new Date(year, month - 1);
-    return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-  };
-
-  if (loading) {
-    return (
-      <div className="p-6">
-        <div className="flex justify-center items-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex justify-between items-center">
+    <div className="page">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h2 className="page-title">Payroll</h2>
+          <p className="page-subtitle mt-1">
+            {periodLabel(selectedPeriod)} · {cutoff.label} · {cutoff.workingDays} working days
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={handleExport}
+          disabled={recordCount === 0}
+          className="btn btn-outline btn-sm shrink-0"
+          title="Exports the records listed below"
+        >
+          <Download size={15} aria-hidden="true" />
+          Export CSV
+        </button>
+      </div>
+
+      {success && (
+        <div className="alert alert-success" role="status">
+          <CheckCircle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <p className="flex-1">{success}</p>
+        </div>
+      )}
+      {error && (
+        <div className="alert alert-danger" role="alert">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <p className="flex-1">{error}</p>
+        </div>
+      )}
+
+      <div className="card flex flex-wrap items-end gap-3 p-4">
         <div>
-          <h1 className="text-2xl font-black text-gray-900 tracking-tight">Payroll Management</h1>
-          <p className="text-gray-500 mt-1 font-medium">
-            {selectedPeriod.cutoffType === 'Full Month'
-              ? `Monthly Cycle • 24 Working Days • ${months[selectedPeriod.month - 1]} ${selectedPeriod.year}`
-              : `${selectedPeriod.cutoffType} Cutoff • 12 Working Days • ${months[selectedPeriod.month - 1]} ${selectedPeriod.year}`}
-          </p>
-        </div>
-        <div className="flex gap-3">
-          <div className="flex gap-2">
+          <label htmlFor="payroll-month" className="label">
+            Month
+          </label>
+          <div className="input-group">
+            <CalendarDays className="input-icon" size={16} aria-hidden="true" />
             <select
+              id="payroll-month"
               value={selectedPeriod.month}
-              onChange={(e) => setSelectedPeriod({ ...selectedPeriod, month: parseInt(e.target.value) })}
-              className="px-3 py-2 border border-gray-300 rounded-lg bg-white"
+              onChange={(event) =>
+                setSelectedPeriod({ ...selectedPeriod, month: Number(event.target.value) })
+              }
+              className="select w-[168px]"
             >
-              {months.map((month, index) => (
-                <option key={index} value={index + 1}>{month}</option>
+              {MONTHS.map((month, index) => (
+                <option key={month} value={index + 1}>
+                  {month}
+                </option>
               ))}
             </select>
-            <select
-              value={selectedPeriod.year}
-              onChange={(e) => setSelectedPeriod({ ...selectedPeriod, year: parseInt(e.target.value) })}
-              className="px-3 py-2 border border-gray-300 rounded-lg bg-white"
-            >
-              {years.map(year => (
-                <option key={year} value={year}>{year}</option>
-              ))}
-            </select>
-            <select
-              value={selectedPeriod.cutoffType}
-              onChange={(e) => setSelectedPeriod({ ...selectedPeriod, cutoffType: e.target.value })}
-              className="px-3 py-2 border border-gray-300 rounded-lg bg-white"
-            >
-              <option value="First Half">First Half (1st-10th)</option>
-              <option value="Second Half">Second Half (11th-25th)</option>
-              <option value="Full Month">Full Month</option>
-            </select>
           </div>
-          <button
-            onClick={() => setViewMode('process')}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            <Calculator size={18} />
-            {selectedPeriod.cutoffType === 'Full Month' ? 'Calculate Monthly' : 'Calculate Bi-Monthly'}
-          </button>
         </div>
+
+        <div>
+          <label htmlFor="payroll-year" className="label">
+            Year
+          </label>
+          <select
+            id="payroll-year"
+            value={selectedPeriod.year}
+            onChange={(event) =>
+              setSelectedPeriod({ ...selectedPeriod, year: Number(event.target.value) })
+            }
+            className="select w-[110px]"
+          >
+            {YEARS.map((year) => (
+              <option key={year} value={year}>
+                {year}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <span className="label">Cutoff</span>
+          {/* Three radio-like buttons rather than a fourth dropdown: the cutoff
+              decides which of the two runs the page is even talking about, so it
+              should be readable without opening anything. */}
+          <div className="segment" role="group" aria-label="Payroll cutoff">
+            {CUTOFFS.map((entry) => (
+              <button
+                key={entry.value}
+                type="button"
+                onClick={() => setSelectedPeriod({ ...selectedPeriod, cutoffType: entry.value })}
+                aria-pressed={selectedPeriod.cutoffType === entry.value}
+                title={entry.detail}
+                className={`segment-item ${
+                  selectedPeriod.cutoffType === entry.value ? 'segment-item-active' : ''
+                }`}
+              >
+                {entry.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <p className="ml-auto max-w-[15rem] text-xs text-muted-foreground">
+          {cutoff.value === 'Full Month'
+            ? 'A monthly run covers the whole calendar month and is not pro-rated by attendance.'
+            : `Covers the ${cutoff.detail}, pro-rated over ${cutoff.workingDays} working days.`}
+        </p>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl p-5 text-white shadow-lg shadow-blue-100/50">
-          <div className="flex justify-between items-start">
-            <div>
-              <p className="text-blue-100 text-sm font-medium">Total Net Distribution</p>
-              <h3 className="text-2xl font-bold mt-1">
-                {formatCurrency(payrollData.reduce((sum, p) => sum + p.net_salary, 0))}
-              </h3>
-            </div>
-            <div className="bg-white/20 p-2 rounded-xl">
-              <Banknote size={24} />
-            </div>
-          </div>
-          <p className="mt-4 text-xs text-blue-100 font-medium">
-            Across {payrollData.length} active records
-          </p>
+      {loading ? (
+        // The page used to return this spinner *instead of* itself, so every
+        // change of month took the period controls off the screen with it.
+        <div className="card flex items-center justify-center py-16" role="status" aria-live="polite">
+          <span className="spinner spinner-lg text-accent" aria-hidden="true" />
+          <span className="sr-only">Loading payroll…</span>
         </div>
-
-        <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
-          <div className="flex justify-between items-start">
-            <div>
-              <p className="text-gray-500 text-sm font-medium">Total Deductions</p>
-              <h3 className="text-2xl font-bold mt-1 text-red-600">
-                {formatCurrency(payrollData.reduce((sum, p) => sum + p.deductions, 0))}
-              </h3>
-            </div>
-            <div className="bg-red-50 p-2 rounded-xl text-red-500">
-              <Receipt size={24} />
-            </div>
-          </div>
-          <p className="mt-4 text-xs text-gray-400 font-medium">
-            Tax & Mandatory Contributions
-          </p>
-        </div>
-
-        <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
-          <div className="flex justify-between items-start">
-            <div>
-              <p className="text-gray-500 text-sm font-medium">Pending Approval</p>
-              <h3 className="text-2xl font-bold mt-1 text-orange-600">
-                {payrollData.filter(p => p.status === 'Pending').length}
-              </h3>
-            </div>
-            <div className="bg-orange-50 p-2 rounded-xl text-orange-500">
-              <Clock size={24} />
-            </div>
-          </div>
-          <p className="mt-4 text-xs text-gray-400 font-medium">
-            Requires your confirmation
-          </p>
-        </div>
-
-        <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
-          <div className="flex justify-between items-start">
-            <div>
-              <p className="text-gray-500 text-sm font-medium">Company Liability</p>
-              <h3 className="text-2xl font-bold mt-1 text-purple-600">
-                {formatCurrency(payrollData.reduce((sum, p) => sum + p.basic_salary + (p.allowances || 0), 0))}
-              </h3>
-            </div>
-            <div className="bg-purple-50 p-2 rounded-xl text-purple-500">
-              <PhilippinePeso size={24} />
-            </div>
-          </div>
-          <p className="mt-4 text-xs text-gray-400 font-medium">
-            Gross Total Payroll
-          </p>
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div className="border-b border-gray-200">
-        <nav className="-mb-px flex space-x-8">
-          <button
-            onClick={() => setViewMode('summary')}
-            className={`py-4 px-1 border-b-2 font-medium font-xs ${viewMode === 'summary'
-              ? 'border-blue-500 text-blue-600'
-              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-          >
-            <div className="flex items-center gap-2">
-              <FileText size={18} />
-              Summary
-            </div>
-          </button>
-          <button
-            onClick={() => setViewMode('details')}
-            className={`py-4 px-1 border-b-2 font-medium font-xs ${viewMode === 'details'
-              ? 'border-blue-500 text-blue-600'
-              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-          >
-            <div className="flex items-center gap-2">
-              <Receipt size={18} />
-              All Payroll Records
-            </div>
-          </button>
-          <button
-            onClick={() => setViewMode('process')}
-            className={`py-4 px-1 border-b-2 font-medium font-xs ${viewMode === 'process'
-              ? 'border-blue-500 text-blue-600'
-              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-          >
-            <div className="flex items-center gap-2">
-              <Calculator size={18} />
-              Process Payroll
-            </div>
-          </button>
-        </nav>
-      </div>
-
-      {/* Content based on view mode */}
-      {viewMode === 'summary' && (
-        <div className="space-y-6">
-          {/* Quick Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-white rounded-xl border border-gray-200 p-6">
-              <h3 className="text-lg font-semibold mb-4">Payroll Overview</h3>
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-600">Total Payroll Cost:</span>
-                  <span className="font-bold">
-                    {formatCurrency(payrollData.reduce((sum, p) => sum + (p.net_salary + p.deductions), 0))}
-                  </span>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {tiles.map((tile, index) => (
+              <div
+                key={tile.label}
+                className="card stagger-card flex items-start justify-between gap-3 p-4"
+                style={{ '--i': index }}
+              >
+                <div className="min-w-0">
+                  <p className="kpi-label truncate-1">{tile.label}</p>
+                  <p className="kpi-value mt-1.5">{tile.value}</p>
+                  <p className="mt-2 text-xs text-muted-foreground">{tile.detail}</p>
                 </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-600">Total Deductions:</span>
-                  <span className="font-bold text-red-600">
-                    {formatCurrency(payrollData.reduce((sum, p) => sum + p.deductions, 0))}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-600">Total Net Pay:</span>
-                  <span className="font-bold text-green-600">
-                    {formatCurrency(payrollData.reduce((sum, p) => sum + p.net_salary, 0))}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-600">Status Distribution:</span>
-                  <div className="flex gap-2">
-                    <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs">
-                      {payrollData.filter(p => p.status === 'Paid').length} Paid
-                    </span>
-                    <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs">
-                      {payrollData.filter(p => p.status === 'Pending').length} Pending
-                    </span>
+                <span className={`kpi-icon ${tile.iconClass}`}>
+                  <tile.icon size={20} aria-hidden="true" />
+                </span>
+              </div>
+            ))}
+          </div>
+
+          <div
+            className="flex flex-wrap gap-1 border-b border-[rgb(248_250_252/0.1)]"
+            role="tablist"
+            aria-label="Payroll views"
+          >
+            {TABS.map((tab) => (
+              <button
+                key={tab.value}
+                type="button"
+                role="tab"
+                id={`payroll-tab-${tab.value}`}
+                aria-selected={viewMode === tab.value}
+                aria-controls="payroll-panel"
+                onClick={() => setViewMode(tab.value)}
+                className={`tab ${viewMode === tab.value ? 'tab-active' : ''}`}
+              >
+                <tab.Icon size={15} aria-hidden="true" />
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          <div
+            role="tabpanel"
+            id="payroll-panel"
+            aria-labelledby={`payroll-tab-${viewMode}`}
+            className="flex flex-col gap-4"
+          >
+            {viewMode === 'summary' && (
+              <>
+                <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                  <div className="card p-5">
+                    <h2 className="section-title">Payroll overview</h2>
+                    <p className="page-subtitle mt-0.5">
+                      {periodLabel(selectedPeriod)} · {cutoff.label}
+                    </p>
+                    <div className="mt-3 flex flex-col">
+                      <div className="field-row">
+                        <span className="field-key">Employees on this run</span>
+                        <span className="field-value">{recordCount}</span>
+                      </div>
+                      <div className="field-row">
+                        <span className="field-key">Total payroll cost</span>
+                        <span className="field-value num">{formatCurrency(totals.cost)}</span>
+                      </div>
+                      <div className="field-row">
+                        <span className="field-key">Total deductions</span>
+                        <span className="field-value num">{formatCurrency(totals.deductions)}</span>
+                      </div>
+                      <div className="field-row">
+                        <span className="field-key">Net distribution</span>
+                        <span className="field-value num">{formatCurrency(totals.net)}</span>
+                      </div>
+                      <div className="field-row">
+                        <span className="field-key">Status</span>
+                        <span className="flex flex-wrap items-center justify-end gap-1.5">
+                          <span className="badge badge-accent">
+                            <CheckCircle size={12} aria-hidden="true" />
+                            {paidCount} paid
+                          </span>
+                          <span className="badge badge-warning">
+                            <Clock size={12} aria-hidden="true" />
+                            {pendingCount} pending
+                          </span>
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="card p-5">
+                    <h2 className="section-title">Tax and contributions</h2>
+                    <p className="page-subtitle mt-0.5">
+                      Employee share, summed from the stored breakdowns
+                    </p>
+                    <div className="mt-3 flex flex-col">
+                      <div className="field-row">
+                        <span className="field-key">SSS</span>
+                        <span className="field-value num">{formatCurrency(totals.sss)}</span>
+                      </div>
+                      <div className="field-row">
+                        <span className="field-key">PhilHealth</span>
+                        <span className="field-value num">{formatCurrency(totals.philhealth)}</span>
+                      </div>
+                      <div className="field-row">
+                        <span className="field-key">Pag-IBIG</span>
+                        <span className="field-value num">{formatCurrency(totals.pagibig)}</span>
+                      </div>
+                      <div className="field-row">
+                        <span className="field-key">Withholding tax</span>
+                        <span className="field-value num">{formatCurrency(totals.tax)}</span>
+                      </div>
+                      <div className="field-row">
+                        <span className="field-key">Total remitted</span>
+                        <span className="field-value num">
+                          {formatCurrency(
+                            totals.sss + totals.philhealth + totals.pagibig + totals.tax
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                    {selectedPeriod.cutoffType !== 'Full Month' && (
+                      // Stated rather than left as a puzzle: the calculator
+                      // returns `incomeTax: 0` for a half-month run and defers
+                      // the whole month's tax to the monthly computation.
+                      <p className="help-text mt-3">
+                        <AlertCircle size={13} aria-hidden="true" />
+                        Withholding tax is computed on the full month, so a half-month run
+                        reports zero.
+                      </p>
+                    )}
                   </div>
                 </div>
-              </div>
-            </div>
 
-            <div className="bg-white rounded-xl border border-gray-200 p-6">
-              <h3 className="text-lg font-semibold mb-4">Tax & Contributions</h3>
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-600">SSS Total:</span>
-                  <span className="font-bold">
-                    {formatCurrency(payrollData.reduce((sum, p) => {
-                      const breakdown = p.breakdown ? JSON.parse(p.breakdown) : {};
-                      return sum + (breakdown.deductions?.mandatory?.sss?.employee || 0);
-                    }, 0))}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-600">PhilHealth Total:</span>
-                  <span className="font-bold">
-                    {formatCurrency(payrollData.reduce((sum, p) => {
-                      const breakdown = p.breakdown ? JSON.parse(p.breakdown) : {};
-                      return sum + (breakdown.deductions?.mandatory?.philhealth?.employee || 0);
-                    }, 0))}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-600">Pag-IBIG Total:</span>
-                  <span className="font-bold">
-                    {formatCurrency(payrollData.reduce((sum, p) => {
-                      const breakdown = p.breakdown ? JSON.parse(p.breakdown) : {};
-                      return sum + (breakdown.deductions?.mandatory?.pagibig?.employee || 0);
-                    }, 0))}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-600">Income Tax Total:</span>
-                  <span className="font-bold text-red-600">
-                    {formatCurrency(payrollData.reduce((sum, p) => {
-                      const breakdown = p.breakdown ? JSON.parse(p.breakdown) : {};
-                      return sum + (breakdown.deductions?.incomeTax || 0);
-                    }, 0))}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
+                <section className="flex flex-col gap-2" aria-labelledby="payroll-records-heading">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <h2 id="payroll-records-heading" className="section-title">
+                        Employee payroll
+                      </h2>
+                      <p className="page-subtitle mt-0.5">
+                        {recordCount} {recordCount === 1 ? 'record' : 'records'} for{' '}
+                        {periodLabel(selectedPeriod)}
+                      </p>
+                    </div>
+                    {/* The original showed this toggle on every cutoff, but the
+                        columns it reveals are only filed by a half-month run. */}
+                    {selectedPeriod.cutoffType !== 'Full Month' && recordCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setShowCutoffDetails(!showCutoffDetails)}
+                        className="btn btn-ghost btn-sm"
+                        aria-expanded={showCutoffDetails}
+                      >
+                        {showCutoffDetails ? (
+                          <ChevronUp size={15} aria-hidden="true" />
+                        ) : (
+                          <ChevronDown size={15} aria-hidden="true" />
+                        )}
+                        {showCutoffDetails ? 'Hide attendance' : 'Show attendance'}
+                      </button>
+                    )}
+                  </div>
 
-          {/* Recent Payroll Records */}
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <div className="p-6 border-b border-gray-200">
-              <div className="flex justify-between items-center">
-                <div>
-                  <h3 className="text-lg font-semibold">Recent Payroll Records</h3>
-                  <p className="text-gray-600 font-xs">
-                    {selectedPeriod.cutoffType} • {getMonthName(selectedPeriod.year, selectedPeriod.month)}
-                  </p>
+                  {recordCount === 0 ? (
+                    <div className="empty-state card">
+                      <span className="empty-state-icon">
+                        <Receipt size={26} aria-hidden="true" />
+                      </span>
+                      <h3 className="section-title">No payroll for this period</h3>
+                      <p className="page-subtitle max-w-md">
+                        Nothing has been filed for {periodLabel(selectedPeriod)} ·{' '}
+                        {cutoff.label}. Open Process payroll to run it.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setViewMode('process')}
+                        className="btn btn-primary btn-sm mt-1"
+                      >
+                        <Calculator size={15} aria-hidden="true" />
+                        Process payroll
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="table-container max-h-[60vh]">
+                      <table className="table">
+                        <thead>
+                          <tr>
+                            <th scope="col">Employee</th>
+                            <th scope="col">Cutoff</th>
+                            {showAttendanceColumns && (
+                              <>
+                                <th scope="col">Days present</th>
+                                <th scope="col" className="num">
+                                  Daily rate
+                                </th>
+                              </>
+                            )}
+                            <th scope="col" className="num">
+                              Gross
+                            </th>
+                            <th scope="col" className="num">
+                              Deductions
+                            </th>
+                            <th scope="col" className="num">
+                              Net pay
+                            </th>
+                            <th scope="col">Status</th>
+                            <th scope="col">
+                              <span className="sr-only">Actions</span>
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {payrollData.map((payroll, index) => {
+                            const status = STATUS_STYLE[payroll.status] ?? STATUS_STYLE.Pending;
+                            const workingDays = num(payroll.working_days) || cutoff.workingDays;
+                            const daysPresent = num(payroll.days_present);
+                            const attendedPercent = workingDays
+                              ? Math.min(100, Math.round((daysPresent / workingDays) * 100))
+                              : 0;
+                            return (
+                              <tr key={payroll.id} className="stagger-row" style={{ '--i': index }}>
+                                <td>
+                                  <div className="flex items-center gap-2.5">
+                                    <span className="avatar h-9 w-9 text-xs" aria-hidden="true">
+                                      {initials(payroll.employee_name)}
+                                    </span>
+                                    <div className="min-w-0">
+                                      <p className="truncate-1 font-medium">
+                                        {payroll.employee_name || '—'}
+                                      </p>
+                                      <p className="truncate-1 text-xs text-muted-foreground">
+                                        {payroll.position || '—'}
+                                      </p>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td>
+                                  <span className="pill">{payroll.cutoff_type || cutoff.value}</span>
+                                  <p className="mt-1 text-xs text-muted-foreground">
+                                    {formatStoredDate(payroll.cutoff_start, {
+                                      month: 'short',
+                                      day: '2-digit'
+                                    })}{' '}
+                                    –{' '}
+                                    {formatStoredDate(payroll.cutoff_end, {
+                                      month: 'short',
+                                      day: '2-digit'
+                                    })}
+                                  </p>
+                                </td>
+                                {showAttendanceColumns && (
+                                  <>
+                                    <td>
+                                      <p className="text-sm tnum">
+                                        {daysPresent} / {workingDays}
+                                      </p>
+                                      {/* Same shape as every other bar in the
+                                          app: a `div` with `role="progressbar"`,
+                                          because `.progress` sizes a block. */}
+                                      <div
+                                        className="progress mt-1.5"
+                                        role="progressbar"
+                                        aria-valuenow={attendedPercent}
+                                        aria-valuemin={0}
+                                        aria-valuemax={100}
+                                        aria-label={`${daysPresent} of ${workingDays} days present`}
+                                      >
+                                        <div
+                                          className="progress-bar"
+                                          style={{ width: `${attendedPercent}%` }}
+                                        />
+                                      </div>
+                                    </td>
+                                    <td className="num">{formatCurrency(payroll.daily_rate)}</td>
+                                  </>
+                                )}
+                                <td className="num">
+                                  {formatCurrency(num(payroll.basic_salary) + num(payroll.allowances))}
+                                </td>
+                                <td className="num">{formatCurrency(payroll.deductions)}</td>
+                                <td className="num font-semibold">
+                                  {formatCurrency(payroll.net_salary)}
+                                </td>
+                                <td>
+                                  <span className={`badge ${status.badge}`}>
+                                    <status.Icon size={12} aria-hidden="true" />
+                                    {payroll.status || 'Pending'}
+                                  </span>
+                                </td>
+                                <td>
+                                  <div className="flex items-center justify-end gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => setSelectedPayroll(payroll)}
+                                      className="btn btn-ghost btn-sm"
+                                      aria-label={`View the payslip for ${payroll.employee_name}`}
+                                    >
+                                      <FileText size={14} aria-hidden="true" />
+                                      Payslip
+                                    </button>
+                                    {payroll.status !== 'Paid' && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleMarkPaid(payroll)}
+                                        className="btn btn-secondary btn-sm"
+                                        aria-label={`Mark ${payroll.employee_name} as paid`}
+                                      >
+                                        <Banknote size={14} aria-hidden="true" />
+                                        Mark paid
+                                      </button>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </section>
+              </>
+            )}
+
+            {viewMode === 'details' && (
+              <section className="flex flex-col gap-2" aria-labelledby="payroll-detail-heading">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <h2 id="payroll-detail-heading" className="section-title">
+                      Payroll records
+                    </h2>
+                    <p className="page-subtitle mt-0.5">
+                      Every row filed for {periodLabel(selectedPeriod)} · {cutoff.label}
+                    </p>
+                  </div>
+                  {/* Export and Print sat here with no handlers. Export now
+                      writes the rows on screen; Print is gone, because the app
+                      carries no print stylesheet to print them with. */}
+                  <button
+                    type="button"
+                    onClick={handleExport}
+                    disabled={recordCount === 0}
+                    className="btn btn-outline btn-sm"
+                  >
+                    <Download size={15} aria-hidden="true" />
+                    Export CSV
+                  </button>
                 </div>
-                <button
-                  onClick={() => setShowCutoffDetails(!showCutoffDetails)}
-                  className="flex items-center gap-2 px-3 py-1 font-xs bg-gray-100 rounded-lg hover:bg-gray-200"
-                >
-                  {showCutoffDetails ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                  {showCutoffDetails ? 'Hide Details' : 'Show Details'}
-                </button>
-              </div>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50 border-b border-gray-200">
-                  <tr>
-                    <th className="py-4 px-6 text-left text-[10px] font-black text-gray-400 uppercase tracking-widest">Employee Information</th>
-                    {showCutoffDetails && selectedPeriod.cutoffType !== 'Full Month' && (
+
+                {recordCount === 0 ? (
+                  <div className="empty-state card">
+                    <span className="empty-state-icon">
+                      <Receipt size={26} aria-hidden="true" />
+                    </span>
+                    <h3 className="section-title">Nothing filed yet</h3>
+                    <p className="page-subtitle max-w-md">
+                      No payroll records exist for {periodLabel(selectedPeriod)} ·{' '}
+                      {cutoff.label}.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="table-container max-h-[60vh]">
+                    <table className="table">
+                      <thead>
+                        <tr>
+                          <th scope="col">Payroll ID</th>
+                          <th scope="col">Employee</th>
+                          <th scope="col">Period</th>
+                          <th scope="col">Cutoff</th>
+                          <th scope="col" className="num">
+                            Gross
+                          </th>
+                          <th scope="col" className="num">
+                            Deductions
+                          </th>
+                          <th scope="col" className="num">
+                            Net pay
+                          </th>
+                          <th scope="col">Status</th>
+                          <th scope="col">Payment date</th>
+                          <th scope="col">
+                            <span className="sr-only">Actions</span>
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {payrollData.map((payroll, index) => {
+                          const status = STATUS_STYLE[payroll.status] ?? STATUS_STYLE.Pending;
+                          return (
+                            <tr key={payroll.id} className="stagger-row" style={{ '--i': index }}>
+                              <td className="font-mono text-xs">PR-{pad(payroll.id)}</td>
+                              <td>
+                                <p className="truncate-1 font-medium">
+                                  {payroll.employee_name || '—'}
+                                </p>
+                                <p className="truncate-1 text-xs text-muted-foreground">
+                                  {payroll.position || '—'}
+                                </p>
+                              </td>
+                              <td>
+                                {/* `new Date('2026-09-01')` is UTC midnight, so
+                                    this column named August in any zone behind
+                                    UTC. Stored dates go through the parser. */}
+                                {formatStoredDate(payroll.cutoff_start, {
+                                  month: 'short',
+                                  year: 'numeric'
+                                })}
+                              </td>
+                              <td>
+                                <span className="pill">{payroll.cutoff_type || cutoff.value}</span>
+                              </td>
+                              <td className="num">
+                                {formatCurrency(num(payroll.basic_salary) + num(payroll.allowances))}
+                              </td>
+                              <td className="num">{formatCurrency(payroll.deductions)}</td>
+                              <td className="num font-semibold">
+                                {formatCurrency(payroll.net_salary)}
+                              </td>
+                              <td>
+                                <span className={`badge ${status.badge}`}>
+                                  <status.Icon size={12} aria-hidden="true" />
+                                  {payroll.status || 'Pending'}
+                                </span>
+                              </td>
+                              <td>
+                                {payroll.payment_date ? (
+                                  formatStoredDate(payroll.payment_date)
+                                ) : (
+                                  <span className="text-muted-foreground">—</span>
+                                )}
+                              </td>
+                              <td>
+                                <div className="flex items-center justify-end gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedPayroll(payroll)}
+                                    className="btn btn-ghost btn-sm"
+                                    aria-label={`View the payslip for ${payroll.employee_name}`}
+                                  >
+                                    <FileText size={14} aria-hidden="true" />
+                                    Payslip
+                                  </button>
+                                  {payroll.status !== 'Paid' && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleMarkPaid(payroll)}
+                                      className="btn btn-secondary btn-sm"
+                                      aria-label={`Mark ${payroll.employee_name} as paid`}
+                                    >
+                                      <Banknote size={14} aria-hidden="true" />
+                                      Mark paid
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+            )}
+
+            {viewMode === 'process' && (
+              <section className="flex flex-col gap-3" aria-labelledby="payroll-process-heading">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <h2 id="payroll-process-heading" className="section-title">
+                      Process {cutoff.label.toLowerCase()} payroll
+                    </h2>
+                    <p className="page-subtitle mt-0.5">
+                      {periodLabel(selectedPeriod)} · {cutoff.detail} · {cutoff.workingDays} working
+                      days
+                    </p>
+                  </div>
+                  {/* One button, not two. The original paired a guarded
+                      "Process" with an unguarded "Confirm & Finalize" that
+                      called the same function, so a second click while the
+                      first run was in flight filed the whole cutoff twice. */}
+                  <button
+                    type="button"
+                    onClick={() => setConfirmRun(true)}
+                    disabled={processing || previewRows.length === 0}
+                    className="btn btn-primary"
+                  >
+                    {processing ? (
                       <>
-                        <th className="py-4 px-6 text-left text-[10px] font-black text-gray-400 uppercase tracking-widest">Attendance</th>
-                        <th className="py-4 px-6 text-left text-[10px] font-black text-gray-400 uppercase tracking-widest">Daily Rate</th>
+                        <Loader2 size={16} className="animate-spin" aria-hidden="true" />
+                        Processing…
+                      </>
+                    ) : (
+                      <>
+                        <Calculator size={16} aria-hidden="true" />
+                        Process {previewRows.length}{' '}
+                        {previewRows.length === 1 ? 'employee' : 'employees'}
                       </>
                     )}
-                    <th className="py-4 px-6 text-left text-[10px] font-black text-gray-400 uppercase tracking-widest">Gross Earnings</th>
-                    <th className="py-4 px-6 text-left text-[10px] font-black text-gray-400 uppercase tracking-widest">Deductions</th>
-                    <th className="py-4 px-6 text-left text-[10px] font-black text-gray-400 uppercase tracking-widest">Net Payable</th>
-                    <th className="py-4 px-6 text-left text-[10px] font-black text-gray-400 uppercase tracking-widest">Status</th>
-                    <th className="py-4 px-6 text-center text-[10px] font-black text-gray-400 uppercase tracking-widest">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {payrollData.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="py-12 text-center text-gray-400">
-                        <div className="flex flex-col items-center gap-2">
-                          <Banknote size={40} className="text-gray-200" />
-                          <p>No records found for this period</p>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : (
-                    payrollData.map((payroll) => (
-                      <tr key={payroll.id} className="hover:bg-blue-50/30 transition-colors group">
-                        <td className="py-4 px-6">
-                          <div className="flex items-center gap-3">
-                            <div className="h-10 w-10 bg-blue-100 rounded-xl flex items-center justify-center text-blue-600 font-bold uppercase">
-                              {payroll.employee_name.split(' ').map(n => n[0]).join('')}
-                            </div>
-                            <div>
-                              <p className="font-bold text-gray-900 leading-none mb-1">{payroll.employee_name}</p>
-                              <p className="text-xs text-gray-500 font-medium">{payroll.position}</p>
-                            </div>
-                          </div>
-                        </td>
-                        {showCutoffDetails && selectedPeriod.cutoffType !== 'Full Month' && (
-                          <>
-                            <td className="py-4 px-6">
-                              <div className="flex flex-col">
-                                <span className="text-sm font-bold text-gray-700">{payroll.days_present || 0} / {payroll.working_days || 12}</span>
-                                <div className="w-16 h-1.5 bg-gray-100 rounded-full mt-1 overflow-hidden">
-                                  <div
-                                    className="h-full bg-blue-500 rounded-full"
-                                    style={{ width: `${Math.min(((payroll.days_present || 0) / (payroll.working_days || 12)) * 100, 100)}%` }}
-                                  />
-                                </div>
-                              </div>
-                            </td>
-                            <td className="py-4 px-6 text-sm font-medium text-gray-600">
-                              {formatCurrency(payroll.daily_rate || 0)}
-                            </td>
-                          </>
-                        )}
-                        <td className="py-4 px-6">
-                          <p className="text-sm font-bold text-gray-900">{formatCurrency(payroll.basic_salary)}</p>
-                        </td>
-                        <td className="py-4 px-6">
-                          <p className="text-sm font-bold text-red-500">-{formatCurrency(payroll.deductions)}</p>
-                        </td>
-                        <td className="py-4 px-6">
-                          <p className="text-base font-black text-blue-600">
-                            {formatCurrency(payroll.net_salary)}
-                          </p>
-                        </td>
-                        <td className="py-4 px-6">
-                          <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${getStatusColor(payroll.status)} shadow-sm`}>
-                            {getStatusIcon(payroll.status)}
-                            {payroll.status}
-                          </span>
-                        </td>
-                        <td className="py-4 px-6">
-                          <div className="flex justify-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button
-                              onClick={() => setSelectedPayroll(payroll)}
-                              className="px-3 py-1.5 text-xs font-bold bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 shadow-sm transition-all"
-                            >
-                              Details
-                            </button>
-                            {payroll.status === 'Pending' && (
-                              <button
-                                onClick={async () => {
-                                  try {
-                                    await window.electronAPI.markPayrollAsPaid(payroll.id);
-                                    loadPayrollData();
-                                  } catch (error) {
-                                    alert('Error marking as paid: ' + error.message);
-                                  }
-                                }}
-                                className="px-3 py-1.5 text-xs font-bold bg-green-600 text-white rounded-lg hover:bg-green-700 shadow-md shadow-green-100 transition-all"
-                              >
-                                Mark Paid
-                              </button>
+                  </button>
+                </div>
+
+                <div className="alert alert-info" role="note">
+                  <AlertCircle size={16} aria-hidden="true" />
+                  <div>
+                    <p className="font-medium">This is a preview.</p>
+                    <p className="mt-0.5">
+                      {selectedPeriod.cutoffType === 'Full Month'
+                        ? 'A monthly run covers every active employee over 24 working days and computes withholding tax.'
+                        : 'A half-month run pro-rates 12 working days by the days present in this cutoff. Withholding tax is deferred to the monthly computation.'}{' '}
+                      Records are filed as Pending until you mark them paid.
+                    </p>
+                  </div>
+                </div>
+
+                {previewRows.length === 0 ? (
+                  <div className="empty-state card">
+                    <span className="empty-state-icon">
+                      <Calculator size={26} aria-hidden="true" />
+                    </span>
+                    <h3 className="section-title">Nothing to process</h3>
+                    <p className="page-subtitle max-w-md">
+                      {selectedPeriod.cutoffType === 'Full Month'
+                        ? 'No active employees were found.'
+                        : `No attendance was recorded for ${cutoff.detail} of ${periodLabel(selectedPeriod)}.`}
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="table-container max-h-[52vh]">
+                      <table className="table">
+                        <thead>
+                          <tr>
+                            <th scope="col">Employee</th>
+                            {selectedPeriod.cutoffType !== 'Full Month' && (
+                              <th scope="col">Days present</th>
                             )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
+                            <th scope="col" className="num">
+                              Daily rate
+                            </th>
+                            <th scope="col" className="num">
+                              Gross
+                            </th>
+                            <th scope="col" className="num">
+                              Deductions
+                            </th>
+                            <th scope="col" className="num">
+                              Net pay
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {previewRows.map(({ employee, attendance, breakdown }, index) => (
+                            <tr key={employee.id} className="stagger-row" style={{ '--i': index }}>
+                              <td>
+                                <div className="flex items-center gap-2.5">
+                                  <span className="avatar h-9 w-9 text-xs" aria-hidden="true">
+                                    {initials(`${employee.first_name} ${employee.last_name}`)}
+                                  </span>
+                                  <div className="min-w-0">
+                                    <p className="truncate-1 font-medium">
+                                      {employee.first_name} {employee.last_name}
+                                    </p>
+                                    <p className="truncate-1 text-xs text-muted-foreground">
+                                      {employee.position || '—'}
+                                    </p>
+                                  </div>
+                                </div>
+                              </td>
+                              {selectedPeriod.cutoffType !== 'Full Month' && (
+                                <td>
+                                  {/* `getCutoffAttendance` left-joins every
+                                      active employee, so a zero here is real and
+                                      is carried into the run exactly as before —
+                                      it just says so now, because the resulting
+                                      net is negative by the mandatory shares. */}
+                                  {num(attendance?.days_present) === 0 ? (
+                                    <span className="badge badge-danger">
+                                      <AlertTriangle size={12} aria-hidden="true" />
+                                      0 of 12 days
+                                    </span>
+                                  ) : (
+                                    <span className="text-sm tnum">
+                                      {num(attendance?.days_present)} / 12
+                                    </span>
+                                  )}
+                                </td>
+                              )}
+                              <td className="num">{formatCurrency(breakdown.dailyRate)}</td>
+                              <td className="num">{formatCurrency(breakdown.basicSalary)}</td>
+                              <td className="num">
+                                {formatCurrency(breakdown.deductions.total)}
+                              </td>
+                              <td
+                                className={`num font-semibold ${
+                                  num(breakdown.netSalary) < 0 ? 'text-destructive' : ''
+                                }`}
+                              >
+                                {formatCurrency(breakdown.netSalary)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
 
-      {viewMode === 'details' && (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <div className="p-6 border-b border-gray-200 flex justify-between items-center">
-            <div>
-              <h3 className="text-lg font-semibold">All Payroll Records</h3>
-              <p className="text-gray-600 font-xs">Complete payroll history</p>
-            </div>
-            <div className="flex gap-2">
-              <button className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">
-                <Download size={18} />
-                Export
-              </button>
-              <button className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">
-                <Printer size={18} />
-                Print
-              </button>
-            </div>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="py-3 px-4 text-left font-xs font-semibold text-gray-700">ID</th>
-                  <th className="py-3 px-4 text-left font-xs font-semibold text-gray-700">Employee</th>
-                  <th className="py-3 px-4 text-left font-xs font-semibold text-gray-700">Period</th>
-                  <th className="py-3 px-4 text-left font-xs font-semibold text-gray-700">Cutoff</th>
-                  <th className="py-3 px-4 text-left font-xs font-semibold text-gray-700">Gross Salary</th>
-                  <th className="py-3 px-4 text-left font-xs font-semibold text-gray-700">Deductions</th>
-                  <th className="py-3 px-4 text-left font-xs font-semibold text-gray-700">Net Salary</th>
-                  <th className="py-3 px-4 text-left font-xs font-semibold text-gray-700">Status</th>
-                  <th className="py-3 px-4 text-left font-xs font-semibold text-gray-700">Payment Date</th>
-                  <th className="py-3 px-4 text-left font-xs font-semibold text-gray-700">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {payrollData.map((payroll) => (
-                  <tr key={payroll.id} className="hover:bg-gray-50">
-                    <td className="py-4 px-4 font-mono font-xs text-gray-500">
-                      #{payroll.id.toString().padStart(4, '0')}
-                    </td>
-                    <td className="py-4 px-4">
-                      <p className="font-medium">{payroll.employee_name}</p>
-                      <p className="font-xs text-gray-500">{payroll.position}</p>
-                    </td>
-                    <td className="py-4 px-4">
-                      {new Date(payroll.cutoff_start).toLocaleDateString('en-PH', { month: 'short', year: 'numeric' })}
-                    </td>
-                    <td className="py-4 px-4">
-                      <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs">
-                        {payroll.cutoff_type || 'Full Month'}
-                      </span>
-                    </td>
-                    <td className="py-4 px-4 font-semibold">
-                      {formatCurrency(payroll.basic_salary + (payroll.allowances || 0))}
-                    </td>
-                    <td className="py-4 px-4">
-                      <div className="text-red-600 font-medium">-{formatCurrency(payroll.deductions)}</div>
-                      <div className="text-xs text-gray-500 mt-1">Includes tax & contributions</div>
-                    </td>
-                    <td className="py-4 px-4">
-                      <p className="font-bold text-lg text-green-600">
-                        {formatCurrency(payroll.net_salary)}
-                      </p>
-                    </td>
-                    <td className="py-4 px-4">
-                      <span className={`inline-flex items-center px-3 py-1 rounded-full font-xs font-medium ${getStatusColor(payroll.status)}`}>
-                        {getStatusIcon(payroll.status)}
-                        {payroll.status}
-                      </span>
-                    </td>
-                    <td className="py-4 px-4">
-                      {payroll.payment_date ? (
-                        new Date(payroll.payment_date).toLocaleDateString('en-PH')
-                      ) : (
-                        <span className="text-gray-400">Not paid</span>
-                      )}
-                    </td>
-                    <td className="py-4 px-4">
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => setSelectedPayroll(payroll)}
-                          className="px-3 py-1 font-xs bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200"
-                        >
-                          Details
-                        </button>
-                        <button
-                          className="p-2 hover:bg-gray-100 rounded-lg"
-                          title="Send Payslip"
-                        >
-                          <Send size={16} className="text-blue-600" />
-                        </button>
+                    <div className="surface grid grid-cols-1 gap-4 p-4 sm:grid-cols-2 lg:grid-cols-4">
+                      <div>
+                        <p className="kpi-label">Employees</p>
+                        <p className="kpi-value mt-1">{previewRows.length}</p>
                       </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                      <div>
+                        <p className="kpi-label">Gross</p>
+                        <p className="kpi-value mt-1">{formatCurrency(previewTotals.gross)}</p>
+                      </div>
+                      <div>
+                        <p className="kpi-label">Deductions</p>
+                        <p className="kpi-value mt-1">{formatCurrency(previewTotals.deductions)}</p>
+                      </div>
+                      <div>
+                        <p className="kpi-label">Net payout</p>
+                        <p className="kpi-value mt-1 text-accent">
+                          {formatCurrency(previewTotals.net)}
+                        </p>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </section>
+            )}
           </div>
-        </div>
+        </>
       )}
 
-      {viewMode === 'process' && (
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <div className="flex justify-between items-center mb-6">
-            <div>
-              <h3 className="text-lg font-semibold">
-                {selectedPeriod.cutoffType === 'Full Month' ? 'Process Monthly Payroll' : `Process ${selectedPeriod.cutoffType} Payroll`}
-              </h3>
-              <p className="text-gray-600">
-                {selectedPeriod.cutoffType === 'Full Month'
-                  ? `${months[selectedPeriod.month - 1]} ${selectedPeriod.year} • 24 working days`
-                  : `${selectedPeriod.cutoffType} of ${months[selectedPeriod.month - 1]} ${selectedPeriod.year} • 12 working days`}
-              </p>
-            </div>
-            <button
-              onClick={selectedPeriod.cutoffType === 'Full Month' ? processMonthlyPayroll : processBiMonthlyPayroll}
-              disabled={processing || (selectedPeriod.cutoffType !== 'Full Month' && cutoffAttendance.length === 0)}
-              className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {processing ? (
-                <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                  Processing...
-                </>
-              ) : (
-                <>
-                  <Calculator size={18} />
-                  {selectedPeriod.cutoffType === 'Full Month' ? 'Process Monthly Payroll' : `Process ${selectedPeriod.cutoffType}`}
-                </>
-              )}
-            </button>
-          </div>
-
-          <div className="bg-white rounded-3xl border border-gray-100 p-8 shadow-sm">
-            <div className="flex justify-between items-center mb-8 pb-4 border-b border-gray-50">
-              <div>
-                <h3 className="text-xl font-black text-gray-900 tracking-tight">Generate Payroll</h3>
-                <p className="text-gray-500 font-medium">Step 2: Review calculation breakdown for {selectedPeriod.cutoffType}</p>
+      {/* No portal: this backdrop is a direct child of `.page`, which sets no
+          `backdrop-filter`, so it is not a containing block for `position:
+          fixed`. Dialogs opened from inside a `.card` do need one. */}
+      {selectedPayroll && (
+        <div
+          className="modal-backdrop"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setSelectedPayroll(null);
+          }}
+        >
+          <div
+            ref={detailRef}
+            tabIndex={-1}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="payslip-title"
+            className="modal-panel max-w-4xl"
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-[rgb(248_250_252/0.1)] px-5 py-4">
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="avatar h-10 w-10 text-sm" aria-hidden="true">
+                  {initials(selectedPayroll.employee_name)}
+                </span>
+                <div className="min-w-0">
+                  <h2 id="payslip-title" className="section-title truncate-1">
+                    {selectedPayroll.employee_name || 'Payslip'}
+                  </h2>
+                  <p className="page-subtitle mt-0.5 truncate-1">
+                    {selectedPayroll.cutoff_type || cutoff.value} ·{' '}
+                    {formatStoredDate(selectedPayroll.cutoff_start, {
+                      month: 'short',
+                      day: '2-digit'
+                    })}{' '}
+                    –{' '}
+                    {formatStoredDate(selectedPayroll.cutoff_end, {
+                      month: 'short',
+                      day: '2-digit',
+                      year: 'numeric'
+                    })}
+                  </p>
+                </div>
               </div>
               <button
-                onClick={() => {
-                  if (selectedPeriod.cutoffType === 'Full Month') {
-                    processMonthlyPayroll();
-                  } else {
-                    processBiMonthlyPayroll();
-                  }
-                }}
-                className="px-8 py-3 bg-blue-600 text-white font-black rounded-2xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 flex items-center gap-2 group"
+                type="button"
+                onClick={() => setSelectedPayroll(null)}
+                className="btn btn-ghost btn-icon"
+                aria-label="Close the payslip"
+                data-autofocus
               >
-                Confirm & Finalize
-                <TrendingUp size={18} className="group-hover:translate-x-1 transition-transform" />
+                <X size={18} aria-hidden="true" />
               </button>
             </div>
 
-            {/* Payroll Preview Header */}
-            <div className="mb-6 px-4 py-3 bg-blue-50/50 rounded-2xl border border-blue-100/50 flex items-center gap-3">
-              <AlertCircle size={18} className="text-blue-500" />
-              <p className="text-sm font-bold text-blue-700">Previewing {selectedPeriod.cutoffType === 'Full Month' ? employees.length : cutoffAttendance.length} records. Please verify totals before finalizing.</p>
+            <div className="px-5 py-4">
+              {(() => {
+                const breakdown = parseBreakdown(selectedPayroll.breakdown);
+                if (!breakdown) {
+                  // A row filed before the breakdown column was populated, or
+                  // one holding malformed JSON. The four `reduce`s that used to
+                  // parse this inline took the page down with them.
+                  return (
+                    <div className="empty-state">
+                      <span className="empty-state-icon">
+                        <FileText size={26} aria-hidden="true" />
+                      </span>
+                      <h3 className="section-title">No breakdown stored</h3>
+                      <p className="page-subtitle max-w-md">
+                        This record holds no readable computation. The figures below come
+                        straight from the payroll row.
+                      </p>
+                      <div className="mt-2 flex w-full max-w-sm flex-col">
+                        <div className="field-row">
+                          <span className="field-key">Gross</span>
+                          <span className="field-value num">
+                            {formatCurrency(
+                              num(selectedPayroll.basic_salary) + num(selectedPayroll.allowances)
+                            )}
+                          </span>
+                        </div>
+                        <div className="field-row">
+                          <span className="field-key">Deductions</span>
+                          <span className="field-value num">
+                            {formatCurrency(selectedPayroll.deductions)}
+                          </span>
+                        </div>
+                        <div className="field-row">
+                          <span className="field-key">Net pay</span>
+                          <span className="field-value num">
+                            {formatCurrency(selectedPayroll.net_salary)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+                return <PayrollBreakdownView breakdown={breakdown} payroll={selectedPayroll} />;
+              })()}
             </div>
 
-            <div className="overflow-hidden rounded-2xl border border-gray-100 mb-8">
-              <table className="w-full">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="py-4 px-6 text-left text-[10px] font-black text-gray-400 uppercase tracking-widest">Employee</th>
-                    {selectedPeriod.cutoffType !== 'Full Month' && (
-                      <>
-                        <th className="py-4 px-6 text-left text-[10px] font-black text-gray-400 uppercase tracking-widest">Attendance</th>
-                        <th className="py-4 px-6 text-left text-[10px] font-black text-gray-400 uppercase tracking-widest">Daily Rate</th>
-                      </>
-                    )}
-                    <th className="py-4 px-6 text-left text-[10px] font-black text-gray-400 uppercase tracking-widest">Gross</th>
-                    <th className="py-4 px-6 text-left text-[10px] font-black text-gray-400 uppercase tracking-widest">SSS/PH/PIG</th>
-                    <th className="py-4 px-6 text-left text-[10px] font-black text-gray-400 uppercase tracking-widest">Tax (2025)</th>
-                    <th className="py-4 px-6 text-right text-[10px] font-black text-gray-400 uppercase tracking-widest">Net Payable</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {(selectedPeriod.cutoffType === 'Full Month'
-                    ? employees.filter(e => e.status === 'Active')
-                    : cutoffAttendance.map(emp => {
-                      const employee = employees.find(e => e.id === emp.employee_id);
-                      return employee ? { ...employee, attendance: emp } : null;
-                    }).filter(Boolean)
-                  ).map((employee) => {
-                    const breakdown = selectedPeriod.cutoffType === 'Full Month'
-                      ? calculateMonthlyPayrollForEmployee(employee)
-                      : calculateBiMonthlyPayrollForEmployee(employee, employee.attendance);
-
-                    return (
-                      <tr key={employee.id} className="hover:bg-gray-50/50 transition-colors">
-                        <td className="py-4 px-6">
-                          <p className="text-sm font-bold text-gray-900 leading-tight">{employee.first_name} {employee.last_name}</p>
-                          <p className="text-[10px] text-gray-400 font-medium uppercase tracking-wider">{employee.position}</p>
-                        </td>
-                        {selectedPeriod.cutoffType !== 'Full Month' && (
-                          <>
-                            <td className="py-4 px-6">
-                              <span className="text-xs font-black text-gray-700">{employee.attendance?.days_present || 0}d</span>
-                            </td>
-                            <td className="py-4 px-6 text-xs font-bold text-gray-500">
-                              {formatCurrency(breakdown.dailyRate)}
-                            </td>
-                          </>
-                        )}
-                        <td className="py-4 px-6">
-                          <span className="text-xs font-bold text-gray-700">{formatCurrency(breakdown.basicSalary)}</span>
-                        </td>
-                        <td className="py-4 px-6">
-                          <span className="text-xs font-bold text-red-400">-{formatCurrency(breakdown.deductions.mandatory.sss.employee + breakdown.deductions.mandatory.philhealth.employee + breakdown.deductions.mandatory.pagibig.employee)}</span>
-                        </td>
-                        <td className="py-4 px-6">
-                          <span className="text-xs font-bold text-red-500">-{formatCurrency(breakdown.deductions.incomeTax)}</span>
-                        </td>
-                        <td className="py-4 px-6 text-right">
-                          <p className="text-sm font-black text-blue-600">
-                            {formatCurrency(breakdown.netSalary)}
-                          </p>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Process Summary Section */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 p-6 bg-gray-50 rounded-3xl border border-gray-100">
-              <div>
-                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Batch Count</p>
-                <p className="text-2xl font-black text-gray-900">
-                  {selectedPeriod.cutoffType === 'Full Month'
-                    ? employees.filter(e => e.status === 'Active').length
-                    : calculateBiMonthlySummary().totalEmployees}
-                </p>
-              </div>
-              <div>
-                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Total Liability</p>
-                <p className="text-2xl font-black text-gray-900">
-                  {formatCurrency(
-                    selectedPeriod.cutoffType === 'Full Month'
-                      ? employees.filter(e => e.status === 'Active').reduce((sum, e) => sum + (e.salary || 0), 0)
-                      : calculateBiMonthlySummary().totalGrossPay
-                  )}
-                </p>
-              </div>
-              <div>
-                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Mandatory Deductions</p>
-                <p className="text-2xl font-black text-red-500">
-                  {formatCurrency(
-                    selectedPeriod.cutoffType === 'Full Month'
-                      ? employees.filter(e => e.status === 'Active').reduce((sum, employee) => {
-                        const breakdown = calculateMonthlyPayrollForEmployee(employee);
-                        return sum + breakdown.deductions.total;
-                      }, 0)
-                      : calculateBiMonthlySummary().totalDeductions
-                  )}
-                </p>
-              </div>
-              <div>
-                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Net Distribution</p>
-                <p className="text-2xl font-black text-green-600">
-                  {formatCurrency(
-                    selectedPeriod.cutoffType === 'Full Month'
-                      ? employees.filter(e => e.status === 'Active').reduce((sum, employee) => {
-                        const breakdown = calculateMonthlyPayrollForEmployee(employee);
-                        return sum + breakdown.netSalary;
-                      }, 0)
-                      : calculateBiMonthlySummary().totalNetPay
-                  )}
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Payroll Detail Modal */}
-      {selectedPayroll && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b border-gray-200">
-              <div className="flex justify-between items-center">
-                <div>
-                  <h3 className="text-l font-bold">Payroll Details</h3>
-                  <p className="text-gray-600">
-                    #{selectedPayroll.id.toString().padStart(4, '0')} • {selectedPayroll.employee_name}
-                    {selectedPayroll.cutoff_type && ` • ${selectedPayroll.cutoff_type}`}
-                  </p>
-                </div>
+            {/* The footer used to carry Print and Send payslip. Neither did
+                anything: there is no print stylesheet and no mail transport in
+                the app. Mark paid is the one action a payslip can perform. */}
+            <div className="flex flex-wrap items-center justify-end gap-2 border-t border-[rgb(248_250_252/0.1)] px-5 py-4">
+              {selectedPayroll.status !== 'Paid' && (
                 <button
-                  onClick={() => setSelectedPayroll(null)}
-                  className="text-gray-400 hover:text-gray-600"
+                  type="button"
+                  onClick={async () => {
+                    const target = selectedPayroll;
+                    setSelectedPayroll(null);
+                    await handleMarkPaid(target);
+                  }}
+                  className="btn btn-secondary"
                 >
-                  ✕
+                  <Banknote size={16} aria-hidden="true" />
+                  Mark paid
                 </button>
-              </div>
-            </div>
-
-            <div className="p-6">
-              {selectedPayroll.breakdown ? (
-                <div className="space-y-6">
-                  <PayrollBreakdownView breakdown={JSON.parse(selectedPayroll.breakdown)} />
-                </div>
-              ) : (
-                <div className="text-center py-8 text-gray-500">
-                  No detailed breakdown available
-                </div>
               )}
+              <button
+                type="button"
+                onClick={() => setSelectedPayroll(null)}
+                className="btn btn-outline"
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        isOpen={confirmRun}
+        title={`Process ${cutoff.label.toLowerCase()} payroll?`}
+        body={
+          <>
+            This files {previewRows.length}{' '}
+            {previewRows.length === 1 ? 'record' : 'records'} for {periodLabel(selectedPeriod)} ·{' '}
+            {cutoff.detail}, each as Pending, totalling{' '}
+            <span className="font-semibold">{formatCurrency(previewTotals.net)}</span> in net pay.
+            {recordCount > 0 && (
+              <>
+                {' '}
+                This period already holds {recordCount}{' '}
+                {recordCount === 1 ? 'record' : 'records'}. Those employees are skipped and
+                their filed figures stand; only employees without a record for the period are
+                added.
+              </>
+            )}
+          </>
+        }
+        confirmLabel="Process payroll"
+        busyLabel="Processing…"
+        variant="primary"
+        icon={Calculator}
+        busy={processing}
+        onConfirm={runPayroll}
+        onCancel={() => setConfirmRun(false)}
+      />
     </div>
   );
 };
 
-// Payroll Breakdown Component
-const PayrollBreakdownView = ({ breakdown }) => {
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-PH', {
-      style: 'currency',
-      currency: 'PHP',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    }).format(amount);
-  };
+/**
+ * The payslip body, drawn from the JSON the run stored on the row.
+ *
+ * Three things it used to get wrong. "Est. Annual Taxable Income" multiplied
+ * `breakdown.halfMonthSalary` by 24 — a key `calculateHalfMonthPayroll` has
+ * never returned, so every bi-monthly payslip read `₱NaN`; it now annualises
+ * `grossSalary` the way the calculator itself does, by 24 halves or 12 months.
+ * The daily rate and working days were read off monthly breakdowns that never
+ * carried them, which is where the second `₱NaN` and the "0 / 24 Days" came
+ * from; both keys are written now, and a row stored before that shows `—`
+ * rather than a figure it does not have. And the employer grid indexed
+ * `employerContributions` unguarded, so an older row threw during render.
+ */
+const PayrollBreakdownView = ({ breakdown, payroll }) => {
+  const halfMonth = Boolean(breakdown.cutoffType);
+  const mandatory = breakdown.deductions?.mandatory ?? {};
+  const employer = breakdown.employerContributions ?? {};
+  const workingDays = num(breakdown.workingDays) || (halfMonth ? 12 : 24);
+  const annualIncome = num(breakdown.grossSalary) * (halfMonth ? 24 : 12);
+  const dailyRate = breakdown.dailyRate ?? payroll?.daily_rate;
 
-  const annualIncome = breakdown.cutoffType ? breakdown.halfMonthSalary * 24 : breakdown.basicSalary * 12;
+  const earnings = [
+    { label: halfMonth ? 'Basic pay (pro-rated)' : 'Basic salary', value: breakdown.basicSalary },
+    { label: 'Allowances', value: breakdown.allowances }
+  ];
+
+  const deductions = [
+    { label: 'SSS', value: mandatory.sss?.employee },
+    { label: 'PhilHealth', value: mandatory.philhealth?.employee },
+    { label: 'Pag-IBIG', value: mandatory.pagibig?.employee },
+    { label: 'Withholding tax', value: breakdown.deductions?.incomeTax },
+    { label: 'Other deductions', value: breakdown.deductions?.otherDeductions }
+  ];
+
+  const employerShares = [
+    { label: 'SSS', value: employer.sss },
+    { label: 'PhilHealth', value: employer.philhealth },
+    { label: 'Pag-IBIG', value: employer.pagibig },
+    { label: 'Total', value: employer.total }
+  ].filter((row) => row.value !== undefined && row.value !== null);
 
   return (
-    <div className="space-y-8">
-      {/* Cutoff & Basic Info */}
-      <div className="flex flex-col md:flex-row gap-6">
-        <div className="flex-1 bg-gradient-to-br from-gray-50 to-white p-5 rounded-2xl border border-gray-100 shadow-sm">
-          <div className="flex items-center gap-4 mb-4">
-            <div className="bg-blue-100 p-3 rounded-xl text-blue-600">
-              <CalendarDays size={20} />
-            </div>
-            <div>
-              <h4 className="text-sm font-bold text-gray-900">Cutoff Details</h4>
-              <p className="text-xs text-gray-500">{breakdown.cutoffType || 'Full Month Report'}</p>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <p className="text-[10px] uppercase tracking-wider text-gray-400 font-bold">Attendance</p>
-              <p className="text-sm font-semibold text-gray-700">{breakdown.daysPresent || 0} / {breakdown.workingDays || 24} Days</p>
-            </div>
-            <div>
-              <p className="text-[10px] uppercase tracking-wider text-gray-400 font-bold">Daily Rate</p>
-              <p className="text-sm font-semibold text-gray-700">{formatCurrency(breakdown.dailyRate)}</p>
+    <div className="flex flex-col gap-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="surface p-3">
+          <p className="kpi-label">Cutoff</p>
+          <p className="mt-1 text-sm font-medium">
+            {breakdown.cutoffType || payroll?.cutoff_type || 'Full Month'}
+          </p>
+        </div>
+        <div className="surface p-3">
+          <p className="kpi-label">Attendance</p>
+          <p className="mt-1 text-sm font-medium tnum">
+            {halfMonth
+              ? `${num(breakdown.daysPresent)} / ${workingDays} days present`
+              : `${workingDays} working days`}
+          </p>
+        </div>
+        <div className="surface p-3">
+          <p className="kpi-label">Daily rate</p>
+          <p className="mt-1 text-sm font-medium tnum">
+            {/* `—`, not `₱NaN`: a row filed before the monthly breakdown
+                carried this key genuinely does not have it. */}
+            {dailyRate === undefined || dailyRate === null ? '—' : formatCurrency(dailyRate)}
+          </p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <div className="surface p-4">
+          <h3 className="eyebrow">Earnings</h3>
+          <div className="mt-2 flex flex-col">
+            {earnings.map((row) => (
+              <div key={row.label} className="field-row">
+                <span className="field-key">{row.label}</span>
+                <span className="field-value num">{formatCurrency(row.value)}</span>
+              </div>
+            ))}
+            <div className="field-row">
+              <span className="field-key font-semibold">Gross pay</span>
+              <span className="field-value num font-semibold">
+                {formatCurrency(breakdown.grossSalary)}
+              </span>
             </div>
           </div>
         </div>
 
-        <div className="flex-1 bg-gradient-to-br from-gray-50 to-white p-5 rounded-2xl border border-gray-100 shadow-sm">
-          <div className="flex items-center gap-4 mb-4">
-            <div className="bg-purple-100 p-3 rounded-xl text-purple-600">
-              <TrendingUp size={20} />
-            </div>
-            <div>
-              <h4 className="text-sm font-bold text-gray-900">Annual Projection</h4>
-              <p className="text-xs text-gray-500">For Tax Computation</p>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 gap-4">
-            <div>
-              <p className="text-[10px] uppercase tracking-wider text-gray-400 font-bold">Est. Annual Taxable Income</p>
-              <p className="text-lg font-black text-purple-600">{formatCurrency(annualIncome)}</p>
+        <div className="surface p-4">
+          <h3 className="eyebrow">Deductions</h3>
+          <div className="mt-2 flex flex-col">
+            {deductions.map((row) => (
+              <div key={row.label} className="field-row">
+                <span className="field-key">{row.label}</span>
+                <span className="field-value num">{formatCurrency(row.value)}</span>
+              </div>
+            ))}
+            <div className="field-row">
+              <span className="field-key font-semibold">Total deductions</span>
+              <span className="field-value num font-semibold">
+                {formatCurrency(breakdown.deductions?.total)}
+              </span>
             </div>
           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        {/* Earnings */}
-        <div className="space-y-4">
-          <div className="flex items-center gap-2 border-b border-gray-100 pb-2">
-            <Banknote size={18} className="text-green-600" />
-            <h4 className="font-bold text-gray-900">Earnings</h4>
-          </div>
-          <div className="space-y-3">
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-600 font-medium">Basic Pay (Adjusted)</span>
-              <span className="font-bold text-gray-900">{formatCurrency(breakdown.basicSalary)}</span>
-            </div>
-            {breakdown.allowances > 0 && (
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-600 font-medium">Fixed Allowances</span>
-                <span className="font-bold text-green-600">+{formatCurrency(breakdown.allowances)}</span>
-              </div>
-            )}
-            <div className="flex justify-between text-base border-t border-dashed border-gray-200 pt-3">
-              <span className="font-black text-gray-900">Gross Earnings</span>
-              <span className="font-black text-gray-900">{formatCurrency(breakdown.grossSalary)}</span>
-            </div>
-          </div>
+      <div className="surface flex flex-wrap items-center justify-between gap-3 p-4">
+        <div>
+          <p className="kpi-label">Net pay</p>
+          <p
+            className={`kpi-value mt-1 ${
+              num(breakdown.netSalary) < 0 ? 'text-destructive' : 'text-accent'
+            }`}
+          >
+            {formatCurrency(breakdown.netSalary)}
+          </p>
         </div>
-
-        {/* Deductions */}
-        <div className="space-y-4">
-          <div className="flex items-center gap-2 border-b border-gray-100 pb-2">
-            <Receipt size={18} className="text-red-600" />
-            <h4 className="font-bold text-gray-900">Deductions</h4>
-          </div>
-          <div className="space-y-3">
-            <div className="p-3 bg-red-50/50 rounded-xl space-y-2">
-              <div className="flex justify-between text-xs">
-                <span className="text-gray-500 font-medium">SSS Premium</span>
-                <span className="font-bold text-red-600">-{formatCurrency(breakdown.deductions.mandatory.sss.employee)}</span>
-              </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-gray-500 font-medium">PhilHealth</span>
-                <span className="font-bold text-red-600">-{formatCurrency(breakdown.deductions.mandatory.philhealth.employee)}</span>
-              </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-gray-500 font-medium">Pag-IBIG</span>
-                <span className="font-bold text-red-600">-{formatCurrency(breakdown.deductions.mandatory.pagibig.employee)}</span>
-              </div>
-            </div>
-
-            <div className="flex justify-between text-sm items-center">
-              <div className="group relative">
-                <span className="text-gray-600 font-medium border-b border-dotted border-gray-400 cursor-help">Income Tax (TRAIN 2025)</span>
-                <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute bottom-full left-0 mb-2 w-64 p-3 bg-gray-900 text-white text-[10px] rounded-lg pointer-events-none z-10 shadow-xl">
-                  Computed by annualizing current earnings to find the correct tax bracket for this month. 2025 rates applied.
-                </div>
-              </div>
-              <span className="font-bold text-red-600">-{formatCurrency(breakdown.deductions.incomeTax)}</span>
-            </div>
-
-            {breakdown.deductions.otherDeductions > 0 && (
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-600 font-medium">Other Deductions</span>
-                <span className="font-bold text-red-600">-{formatCurrency(breakdown.deductions.otherDeductions)}</span>
-              </div>
-            )}
-
-            <div className="flex justify-between text-base border-t border-dashed border-gray-200 pt-3">
-              <span className="font-black text-gray-900">Total Deductions</span>
-              <span className="font-black text-red-600">-{formatCurrency(breakdown.deductions.total)}</span>
-            </div>
-          </div>
+        <div className="text-right">
+          <p className="kpi-label">Est. annual taxable income</p>
+          <p className="mt-1 text-base font-semibold tnum">{formatCurrency(annualIncome)}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Gross × {halfMonth ? '24 half-months' : '12 months'}
+          </p>
         </div>
       </div>
 
-      {/* Net Pay Highlight */}
-      <div className="bg-gradient-to-r from-blue-600 to-blue-700 p-6 rounded-2xl text-white shadow-lg shadow-blue-200">
-        <div className="flex justify-between items-end">
-          <div>
-            <p className="text-blue-100 text-sm font-medium mb-1 uppercase tracking-widest">Net Take-Home Pay</p>
-            <h3 className="text-4xl font-black">{formatCurrency(breakdown.netSalary)}</h3>
-          </div>
-          <div className="text-right">
-            <p className="text-blue-100 text-[10px] font-bold uppercase mb-1">Total Liability to Employer</p>
-            <p className="text-xl font-bold bg-white/20 px-3 py-1 rounded-lg inline-block">
-              {formatCurrency(breakdown.grossSalary + (breakdown.employerContributions?.total || 0))}
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* Employer Section */}
-      <div className="bg-gray-50 rounded-2xl p-5 border border-gray-200">
-        <h5 className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-4">Employer Share (Non-deductible)</h5>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div>
-            <p className="text-xs text-gray-500 mb-1">SSS ER</p>
-            <p className="font-bold text-gray-700">{formatCurrency(breakdown.employerContributions.sss)}</p>
-          </div>
-          <div>
-            <p className="text-xs text-gray-500 mb-1">PhilHealth ER</p>
-            <p className="font-bold text-gray-700">{formatCurrency(breakdown.employerContributions.philhealth)}</p>
-          </div>
-          <div>
-            <p className="text-xs text-gray-500 mb-1">Pag-IBIG ER</p>
-            <p className="font-bold text-gray-700">{formatCurrency(breakdown.employerContributions.pagibig)}</p>
-          </div>
-          <div>
-            <p className="text-xs text-gray-500 mb-1">Total ER Share</p>
-            <p className="font-black text-blue-600">{formatCurrency(breakdown.employerContributions.total)}</p>
+      {employerShares.length > 0 && (
+        <div>
+          <h3 className="eyebrow">Employer share</h3>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Paid by the company on top of the net above. It is not part of the payroll totals,
+            which count the employee&rsquo;s share only.
+          </p>
+          <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {employerShares.map((row) => (
+              <div key={row.label} className="surface-muted p-3">
+                <p className="kpi-label">{row.label}</p>
+                <p className="mt-1 text-sm font-medium tnum">{formatCurrency(row.value)}</p>
+              </div>
+            ))}
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };
 
 export default Payroll;
+

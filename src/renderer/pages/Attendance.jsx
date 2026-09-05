@@ -1,149 +1,150 @@
-import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, CheckCircle, XCircle, Users, Search, Filter, RefreshCw, Loader2, AlertCircle, ChevronLeft, ChevronRight, Lock } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import {
+  AlertCircle,
+  Calendar,
+  CheckCircle,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  Loader2,
+  Lock,
+  LogIn,
+  LogOut,
+  Percent,
+  RefreshCw,
+  Search,
+  Trash2,
+  UserCheck,
+  Users,
+  X,
+  XCircle
+} from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import AttendanceChart from '../components/Attendance/AttendanceChart';
 import MonthlyAttendanceReport from '../components/Attendance/MonthlyAttendanceReport';
+import ConfirmDialog from '../components/ui/ConfirmDialog';
+import { useDialog } from '../hooks/useDialog';
 import { useUser } from '../contexts/UserContext';
+import { formatStoredDate, manilaDate, manilaTime, shiftStoredDate } from '../utils/manila';
 
-// Helper to get current time in Asia/Manila
-const getManilaTime = () => {
-  return new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'Asia/Manila',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false
-  }).format(new Date());
+const STATUS_BADGE = {
+  Present: 'badge-accent',
+  Absent: 'badge-danger',
+  Late: 'badge-warning',
+  'On Leave': 'badge-info'
 };
 
-// Helper to get current date in Asia/Manila (YYYY-MM-DD)
-const getManilaDate = () => {
-  const d = new Date();
-  const manilaDate = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Manila',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  }).format(d);
-  return manilaDate;
-};
+/** `HH:MM:SS` → `HH:MM`, 24-hour, as the shift columns showed it before. */
+const formatTime = (time) => (time ? String(time).slice(0, 5) : '--:--');
+
+const initials = (employee) =>
+  `${employee.first_name?.[0] ?? ''}${employee.last_name?.[0] ?? ''}`.toUpperCase() || '—';
 
 const Attendance = () => {
   const [attendanceData, setAttendanceData] = useState([]);
   const [employees, setEmployees] = useState([]);
+  const [departments, setDepartments] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [selectedDate, setSelectedDate] = useState(getManilaDate());
+  const [isRecording, setIsRecording] = useState(false);
+  // Today in Manila, not in UTC: before 08:00 the two are different days and the
+  // punch would have been filed against yesterday.
+  const [selectedDate, setSelectedDate] = useState(manilaDate());
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDepartment, setFilterDepartment] = useState('');
-  const [departments, setDepartments] = useState([]);
-  const [isRecording, setIsRecording] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [bulkConfirm, setBulkConfirm] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState(null);
 
   const { user } = useUser();
+  const navigate = useNavigate();
   const [showKioskModal, setShowKioskModal] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
   const [kioskError, setKioskError] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
 
-  // Load initial data
+  const closeKiosk = () => {
+    if (isVerifying) return;
+    setShowKioskModal(false);
+    setAdminPassword('');
+    setKioskError('');
+  };
+
+  const kioskRef = useDialog(showKioskModal, closeKiosk);
+
   useEffect(() => {
     loadAttendanceData(selectedDate);
     loadEmployees();
     loadDepartments();
   }, [selectedDate]);
 
+  // The `alert()` calls these replace stopped the whole webview to report a
+  // failed write.
+  const flashError = (message) => {
+    setError(message);
+    setTimeout(() => setError(''), 5000);
+  };
+
+  const flashSuccess = (message) => {
+    setSuccess(message);
+    setTimeout(() => setSuccess(''), 3000);
+  };
   const loadAttendanceData = async (date = null) => {
     try {
       setLoading(true);
-      // Use the provided date or selectedDate
       const targetDate = date || selectedDate;
-
-      const attendanceQuery = `
-        SELECT * FROM attendance 
-        WHERE date = ? 
-        ORDER BY employee_id
-      `;
-
-      const data = await window.electronAPI.query(attendanceQuery, [targetDate]);
+      // Was a raw `SELECT * FROM attendance WHERE date = ?` through the generic
+      // `query` passthrough. That passthrough is gone: this is the command that
+      // replaced it, and it returns the same rows joined to the employee, as
+      // `get_today_attendance` already did for today.
+      const data = await window.api.getAttendanceByDate(targetDate);
       setAttendanceData(data || []);
-    } catch (error) {
-      console.error('Error loading attendance:', error);
+    } catch (err) {
+      console.error('Error loading attendance:', err);
       setAttendanceData([]);
+      // The old version cleared the table and said nothing, so a failed read
+      // and a day with no punches looked identical.
+      flashError('Could not read the attendance for this date.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleLaunchKiosk = async (e) => {
-    e.preventDefault();
-    setIsVerifying(true);
-    setKioskError('');
-
-    try {
-      if (!adminPassword) {
-        throw new Error('Password is required');
-      }
-
-      // Verify admin password
-      const result = await window.electronAPI.loginUser(user.email, adminPassword);
-
-      if (result.success) {
-        // Success - Launch Kiosk
-        window.open('#/kiosk', '_self');
-      } else {
-        throw new Error(result.error || 'Invalid password');
-      }
-    } catch (error) {
-      console.error('Kiosk launch error:', error);
-      setKioskError(error.message);
-    } finally {
-      setIsVerifying(false);
-    }
-  };
-
-  const isToday = selectedDate === getManilaDate();
-
   const loadEmployees = async () => {
     try {
-      const data = await window.electronAPI.getAllEmployees();
+      const data = await window.api.getAllEmployees();
       setEmployees(data || []);
-    } catch (error) {
-      console.error('Error loading employees:', error);
+    } catch (err) {
+      console.error('Error loading employees:', err);
       setEmployees([]);
     }
   };
 
   const loadDepartments = async () => {
     try {
-      const data = await window.electronAPI.getAllDepartments();
+      const data = await window.api.getAllDepartments();
       setDepartments(data || []);
-    } catch (error) {
-      console.error('Error loading departments:', error);
+    } catch (err) {
+      console.error('Error loading departments:', err);
       setDepartments([]);
     }
   };
-
   const handleTimeIn = async (employeeId) => {
     try {
       setIsRecording(true);
-      const currentTime = getManilaTime();
+      const currentTime = manilaTime();
 
-      const attendanceRecord = {
+      await window.api.recordAttendance({
         employee_id: employeeId,
         date: selectedDate,
         status: 'Present',
         check_in: currentTime,
         notes: `Timed in at ${currentTime} (Manila Time)`
-      };
-
-      await window.electronAPI.recordAttendance(attendanceRecord);
+      });
       await loadAttendanceData(selectedDate);
-
-      const employee = employees.find(emp => emp.id === employeeId);
-      if (employee) {
-
-      }
-    } catch (error) {
-      console.error('Error recording time in:', error);
-      alert(`Error: ${error.message}`);
+    } catch (err) {
+      console.error('Error recording time in:', err);
+      flashError(`Could not record the time in: ${err.message}`);
     } finally {
       setIsRecording(false);
     }
@@ -152,197 +153,674 @@ const Attendance = () => {
   const handleTimeOut = async (employeeId) => {
     try {
       setIsRecording(true);
-      const currentTime = getManilaTime();
+      const currentTime = manilaTime();
 
-      const attendanceRecord = {
+      await window.api.recordAttendance({
         employee_id: employeeId,
         date: selectedDate,
+        // The command upserts with `COALESCE(excluded.check_in, …)`, so the
+        // morning punch survives this write; `status` is restated for the row
+        // that was created as anything other than Present.
+        status: 'Present',
         check_out: currentTime,
-        status: 'Present', // Ensure status stays Present
         notes: `Timed out at ${currentTime} (Manila Time)`
-      };
-
-      await window.electronAPI.recordAttendance(attendanceRecord);
+      });
       await loadAttendanceData(selectedDate);
-
-      const employee = employees.find(emp => emp.id === employeeId);
-      if (employee) {
-
-      }
-    } catch (error) {
-      console.error('Error recording time out:', error);
-      alert(`Error: ${error.message}`);
+    } catch (err) {
+      console.error('Error recording time out:', err);
+      flashError(`Could not record the time out: ${err.message}`);
     } finally {
       setIsRecording(false);
     }
   };
-
   const handleMarkAbsent = async (employeeId) => {
     try {
       setIsRecording(true);
 
-      const attendanceRecord = {
+      await window.api.recordAttendance({
         employee_id: employeeId,
         date: selectedDate,
         status: 'Absent',
         check_in: null,
         check_out: null,
         notes: 'Marked as Absent'
-      };
-
-      await window.electronAPI.recordAttendance(attendanceRecord);
+      });
       await loadAttendanceData(selectedDate);
-    } catch (error) {
-      console.error('Error marking absent:', error);
-      alert(`Error: ${error.message}`);
+    } catch (err) {
+      console.error('Error marking absent:', err);
+      flashError(`Could not mark absent: ${err.message}`);
     } finally {
       setIsRecording(false);
     }
   };
 
   const handleMarkAllPresent = async () => {
-    if (!window.confirm(`Mark all employees as present (timed in) for ${selectedDate}?`)) {
-      return;
-    }
-
     try {
       setIsRecording(true);
-      const currentTime = getManilaTime();
+      const currentTime = manilaTime();
+      let written = 0;
 
+      // Sequential, as before: each iteration is an upsert on the same table,
+      // and employees who already have a row for the day are left alone rather
+      // than having their real punch overwritten with this one.
       for (const employee of filteredEmployees) {
-        const existingRecord = attendanceData.find(record =>
-          record.employee_id === employee.id &&
-          record.date === selectedDate
+        const existing = attendanceData.find(
+          (record) => record.employee_id === employee.id && record.date === selectedDate
         );
+        if (existing) continue;
 
-        if (!existingRecord) {
-          const attendanceRecord = {
-            employee_id: employee.id,
-            date: selectedDate,
-            status: 'Present',
-            check_in: currentTime,
-            notes: 'Bulk marked present (timed in)'
-          };
-
-          await window.electronAPI.recordAttendance(attendanceRecord);
-        }
+        await window.api.recordAttendance({
+          employee_id: employee.id,
+          date: selectedDate,
+          status: 'Present',
+          check_in: currentTime,
+          notes: 'Bulk marked present (timed in)'
+        });
+        written += 1;
       }
 
       await loadAttendanceData(selectedDate);
-    } catch (error) {
-      console.error('Error bulk marking attendance:', error);
-      alert(`Error: ${error.message}`);
+      flashSuccess(
+        written === 0
+          ? 'Every employee shown already had a record for this date.'
+          : `Timed in ${written} ${written === 1 ? 'employee' : 'employees'} at ${currentTime}.`
+      );
+    } catch (err) {
+      console.error('Error bulk marking attendance:', err);
+      flashError(`Could not finish marking everyone present: ${err.message}`);
     } finally {
       setIsRecording(false);
+      setBulkConfirm(false);
+    }
+  };
+  const handleRemoveRecord = async () => {
+    if (!removeTarget) return;
+    const name = `${removeTarget.first_name} ${removeTarget.last_name}`.trim();
+
+    try {
+      setIsRecording(true);
+      // `recordAttendance` only ever upserts, so removing a punch needs its own
+      // command; this was the second and last statement sent through the raw
+      // SQL passthrough.
+      await window.api.deleteAttendance(removeTarget.id, selectedDate);
+      await loadAttendanceData(selectedDate);
+      flashSuccess(`Removed the attendance record for ${name}.`);
+    } catch (err) {
+      // This failure used to go to the console only: the row stayed on screen
+      // with no explanation for why the click did nothing.
+      console.error('Error deleting record:', err);
+      flashError(`Could not remove the record: ${err.message}`);
+    } finally {
+      setIsRecording(false);
+      setRemoveTarget(null);
     }
   };
 
-  const formatTime = (time) => {
-    if (!time) return '--:--';
-    return time.substring(0, 5); // Remove seconds
-  };
+  const handleLaunchKiosk = async (event) => {
+    event.preventDefault();
+    setIsVerifying(true);
+    setKioskError('');
 
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'Present': return 'bg-green-100 text-green-800';
-      case 'Absent': return 'bg-red-100 text-red-800';
-      case 'Late': return 'bg-yellow-100 text-yellow-800';
-      case 'On Leave': return 'bg-blue-100 text-blue-800';
-      default: return 'bg-gray-100 text-gray-800';
+    try {
+      if (!adminPassword) {
+        throw new Error('Password is required');
+      }
+
+      const result = await window.api.loginUser(user.email, adminPassword);
+      if (!result.success) {
+        throw new Error(result.error || 'Invalid password');
+      }
+
+      // `window.open('#/kiosk', '_self')` reloaded the whole webview — and with
+      // it the database handle and every context — to reach a route the router
+      // already owns.
+      navigate('/kiosk');
+    } catch (err) {
+      console.error('Kiosk launch error:', err);
+      setKioskError(err.message);
+    } finally {
+      setIsVerifying(false);
     }
   };
-
-  // Filter employees
-  const filteredEmployees = employees.filter(employee => {
-    // Filter by search term
-    if (searchTerm && !`${employee.first_name} ${employee.last_name}`.toLowerCase().includes(searchTerm.toLowerCase())) {
+  const filteredEmployees = employees.filter((employee) => {
+    if (
+      searchTerm &&
+      !`${employee.first_name} ${employee.last_name}`
+        .toLowerCase()
+        .includes(searchTerm.toLowerCase())
+    ) {
       return false;
     }
-
-    // Filter by department
+    // Loose comparison kept deliberately: the select's value is a string and
+    // `department_id` comes back from SQLite as a number.
     if (filterDepartment && employee.department_id != filterDepartment) {
       return false;
     }
-
     return true;
   });
 
-  // Get attendance summary
-  const presentCount = attendanceData.filter(record => record.status === 'Present').length;
-  const absentCount = attendanceData.filter(record => record.status === 'Absent').length;
-  const totalEmployees = employees.length;
+  const recordFor = (employeeId) =>
+    attendanceData.find((record) => record.employee_id === employeeId);
 
-  // Navigate dates
-  const navigateDate = (days) => {
-    const currentDate = new Date(selectedDate);
-    currentDate.setDate(currentDate.getDate() + days);
-    setSelectedDate(currentDate.toISOString().split('T')[0]);
+  const presentCount = attendanceData.filter((record) => record.status === 'Present').length;
+  const absentCount = attendanceData.filter((record) => record.status === 'Absent').length;
+  const totalEmployees = employees.length;
+  // Present over the whole roster rather than over the filtered rows — the same
+  // arithmetic the tile did before, and the reason the rate drops when a filter
+  // narrows the table but the tile does not move.
+  const attendanceRate = totalEmployees > 0 ? (presentCount / totalEmployees) * 100 : 0;
+  const unrecorded = filteredEmployees.filter((employee) => !recordFor(employee.id)).length;
+
+  const isToday = selectedDate === manilaDate();
+  const filtersActive = Boolean(searchTerm || filterDepartment);
+
+  const clearFilters = () => {
+    setSearchTerm('');
+    setFilterDepartment('');
   };
 
-
-
+  const dayLabel = formatStoredDate(selectedDate, {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
+  const tiles = [
+    {
+      label: 'Total employees',
+      value: totalEmployees,
+      detail:
+        filteredEmployees.length === totalEmployees
+          ? 'The whole roster'
+          : `${filteredEmployees.length} shown by the filters`,
+      icon: Users,
+      iconClass: 'bg-[rgb(96_165_250/0.14)] text-info'
+    },
+    {
+      label: 'Present',
+      value: presentCount,
+      detail: `${unrecorded} of the rows below have no record yet`,
+      icon: CheckCircle,
+      iconClass: 'bg-[rgb(34_197_94/0.14)] text-accent'
+    },
+    {
+      label: 'Absent',
+      value: absentCount,
+      detail: 'Marked absent for this date',
+      icon: XCircle,
+      iconClass: 'bg-[rgb(239_68_68/0.14)] text-destructive'
+    },
+    {
+      label: 'Attendance rate',
+      value: `${attendanceRate.toFixed(1)}%`,
+      detail: `${presentCount} present of ${totalEmployees} on the roster`,
+      icon: Percent,
+      iconClass: 'bg-[rgb(251_191_36/0.14)] text-warning'
+    }
+  ];
   return (
-    <div className="space-y-6">
-      {/* Kiosk Password Modal */}
-      {showKioskModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="p-3 bg-blue-100 rounded-full text-blue-600">
-                <Lock size={24} />
+    <div className="page">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div className="min-w-0">
+          <h2 className="page-title">Attendance</h2>
+          <p className="page-subtitle mt-1">
+            {dayLabel}
+            {isToday ? ' · today' : ''}
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Stepping by whole calendar days through `shiftStoredDate`, not by
+              24 hours through a `Date`. */}
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setSelectedDate(shiftStoredDate(selectedDate, -1))}
+              className="btn btn-ghost btn-icon"
+              aria-label="Previous day"
+              title="Previous day"
+            >
+              <ChevronLeft size={18} aria-hidden="true" />
+            </button>
+            <div className="input-group">
+              <Calendar className="input-icon" size={16} aria-hidden="true" />
+              <input
+                id="attendance-date"
+                type="date"
+                className="input w-[170px]"
+                value={selectedDate}
+                onChange={(event) => setSelectedDate(event.target.value)}
+                aria-label="Attendance date"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => setSelectedDate(shiftStoredDate(selectedDate, 1))}
+              className="btn btn-ghost btn-icon"
+              aria-label="Next day"
+              title="Next day"
+            >
+              <ChevronRight size={18} aria-hidden="true" />
+            </button>
+          </div>
+          {!isToday && (
+            <button
+              type="button"
+              onClick={() => setSelectedDate(manilaDate())}
+              className="btn btn-ghost btn-sm"
+            >
+              Today
+            </button>
+          )}
+          <button
+            type="button"
+            // The old Refresh handed React's click event to `loadAttendanceData`
+            // as its `date` argument, which is truthy, so the query ran against
+            // an event object instead of the selected day.
+            onClick={() => loadAttendanceData(selectedDate)}
+            disabled={loading}
+            className="btn btn-outline btn-sm"
+          >
+            <RefreshCw size={15} className={loading ? 'animate-spin' : ''} aria-hidden="true" />
+            Refresh
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowKioskModal(true)}
+            className="btn btn-secondary btn-sm"
+            title="Launch the self-service kiosk"
+          >
+            <Clock size={15} aria-hidden="true" />
+            Kiosk mode
+          </button>
+        </div>
+      </div>
+      {/* Four `alert()` calls used to report these, one dialog at a time. */}
+      {success && (
+        <div className="alert alert-success" role="status">
+          <CheckCircle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <p className="flex-1">{success}</p>
+        </div>
+      )}
+      {error && (
+        <div className="alert alert-danger" role="alert">
+          <AlertCircle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <p className="flex-1">{error}</p>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {tiles.map((tile, index) => {
+          const Icon = tile.icon;
+          return (
+            <div
+              key={tile.label}
+              className="card stagger-card flex items-start justify-between gap-3 p-4"
+              style={{ '--i': index }}
+            >
+              <div className="min-w-0">
+                <p className="kpi-label truncate-1">{tile.label}</p>
+                <p className="kpi-value mt-1.5">{tile.value}</p>
+                <p className="mt-2 text-xs text-muted-foreground">{tile.detail}</p>
               </div>
-              <div>
-                <h3 className="text-xl font-bold text-gray-900">Admin Access Required</h3>
-                <p className="text-sm text-gray-500">Enter your password to launch Kiosk Mode</p>
+              <span className={`kpi-icon ${tile.iconClass}`}>
+                <Icon size={20} aria-hidden="true" />
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="card grid grid-cols-1 gap-3 p-4 md:grid-cols-[minmax(0,1fr)_200px_auto_auto]">
+        <div className="min-w-0">
+          <label htmlFor="attendance-search" className="label">
+            Search
+          </label>
+          <div className="input-group">
+            <Search className="input-icon" size={16} aria-hidden="true" />
+            <input
+              id="attendance-search"
+              type="search"
+              className="input"
+              placeholder="Employee name"
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+            />
+          </div>
+        </div>
+
+        <div className="min-w-0">
+          <label htmlFor="attendance-department" className="label">
+            Department
+          </label>
+          <select
+            id="attendance-department"
+            className="select"
+            value={filterDepartment}
+            onChange={(event) => setFilterDepartment(event.target.value)}
+          >
+            <option value="">All departments</option>
+            {departments.map((department) => (
+              <option key={department.id} value={department.id}>
+                {department.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex items-end">
+          <button
+            type="button"
+            onClick={() => setBulkConfirm(true)}
+            disabled={isRecording || filteredEmployees.length === 0}
+            className="btn btn-primary w-full md:w-auto"
+          >
+            <UserCheck size={15} aria-hidden="true" />
+            Mark all present
+          </button>
+        </div>
+
+        <div className="flex items-end">
+          <button
+            type="button"
+            onClick={clearFilters}
+            disabled={!filtersActive}
+            className="btn btn-ghost w-full md:w-auto"
+          >
+            <X size={15} aria-hidden="true" />
+            Clear
+          </button>
+        </div>
+      </div>
+      <section className="flex flex-col gap-2" aria-labelledby="attendance-heading">
+        <div className="flex flex-wrap items-baseline justify-between gap-3">
+          <h3 id="attendance-heading" className="section-title">
+            Employee attendance
+          </h3>
+          <p className="text-xs tabular-nums text-muted-foreground">
+            {filteredEmployees.length === totalEmployees
+              ? `${totalEmployees} ${totalEmployees === 1 ? 'employee' : 'employees'}`
+              : `${filteredEmployees.length} of ${totalEmployees} shown`}
+          </p>
+        </div>
+
+        {loading ? (
+          <div
+            className="card flex items-center justify-center py-16"
+            role="status"
+            aria-live="polite"
+          >
+            <span className="spinner spinner-lg text-accent" aria-hidden="true" />
+            <span className="sr-only">Loading attendance…</span>
+          </div>
+        ) : filteredEmployees.length === 0 ? (
+          <div className="card">
+            <div className="empty-state">
+              <span className="empty-state-icon" aria-hidden="true">
+                <Users size={26} />
+              </span>
+              {totalEmployees === 0 ? (
+                <p className="text-sm">No employees on record to take attendance for.</p>
+              ) : (
+                <>
+                  <p className="text-sm">No employees match these filters.</p>
+                  <button
+                    type="button"
+                    onClick={clearFilters}
+                    className="btn btn-outline btn-sm mt-1"
+                  >
+                    <X size={15} aria-hidden="true" />
+                    Clear filters
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="table-container max-h-[60vh]">            <table className="table">
+              <thead>
+                <tr>
+                  <th scope="col">Employee</th>
+                  <th scope="col">Department</th>
+                  <th scope="col">Position</th>
+                  <th scope="col">Check in</th>
+                  <th scope="col">Check out</th>
+                  <th scope="col">Status</th>
+                  <th scope="col" className="text-right">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredEmployees.map((employee, index) => {
+                  const record = recordFor(employee.id);
+                  return (
+                    <tr key={employee.id} className="stagger-row" style={{ '--i': index }}>
+                      <td>
+                        <div className="flex items-center gap-3">
+                          <span className="avatar h-9 w-9 text-xs">{initials(employee)}</span>
+                          <span className="min-w-0">
+                            <span
+                              className="block truncate-1 font-medium"
+                              title={`${employee.first_name} ${employee.last_name}`}
+                            >
+                              {employee.first_name} {employee.last_name}
+                            </span>
+                            <span className="block text-xs text-muted-foreground">
+                              {employee.company_id}
+                            </span>
+                          </span>
+                        </div>
+                      </td>
+                      <td>
+                        {/* Null here means no department, which the old copy
+                            called "No Department" — the roster elsewhere calls
+                            it Unassigned. */}
+                        <span className="badge badge-muted">
+                          {employee.department_name || 'Unassigned'}
+                        </span>
+                      </td>
+                      <td>
+                        <span className="block truncate-1" title={employee.position}>
+                          {employee.position}
+                        </span>
+                      </td>
+                      <td>
+                        <span
+                          className={`font-mono ${record?.check_in ? '' : 'text-muted-foreground'}`}
+                        >
+                          {formatTime(record?.check_in)}
+                        </span>
+                      </td>
+                      <td>
+                        <span
+                          className={`font-mono ${
+                            record?.check_out ? '' : 'text-muted-foreground'
+                          }`}
+                        >
+                          {formatTime(record?.check_out)}
+                        </span>
+                      </td>
+                      <td>
+                        <span
+                          className={`badge ${
+                            record ? STATUS_BADGE[record.status] || 'badge-muted' : 'badge-muted'
+                          }`}
+                        >
+                          {record ? record.status : 'Not recorded'}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="flex flex-wrap items-center justify-end gap-1.5">
+                          {/* The three punch buttons appear under exactly the
+                              conditions they did before: Time in until there is
+                              a check_in, Time out only between the two punches,
+                              Absent only while the day is still blank. */}
+                          {!record?.check_in && (
+                            <button
+                              type="button"
+                              onClick={() => handleTimeIn(employee.id)}
+                              disabled={isRecording || record?.status === 'Absent'}
+                              className="btn btn-outline btn-sm"
+                              title={
+                                record?.status === 'Absent'
+                                  ? 'Remove the absence first'
+                                  : `Time ${employee.first_name} in`
+                              }
+                            >
+                              <LogIn size={14} aria-hidden="true" />
+                              Time in
+                            </button>
+                          )}
+
+                          {record?.check_in && !record?.check_out && (
+                            <button
+                              type="button"
+                              onClick={() => handleTimeOut(employee.id)}
+                              disabled={isRecording}
+                              className="btn btn-outline btn-sm"
+                              title={`Time ${employee.first_name} out`}
+                            >
+                              <LogOut size={14} aria-hidden="true" />
+                              Time out
+                            </button>
+                          )}
+
+                          {record?.status !== 'Absent' && !record?.check_in && (
+                            <button
+                              type="button"
+                              onClick={() => handleMarkAbsent(employee.id)}
+                              disabled={isRecording}
+                              className="btn btn-ghost btn-sm"
+                            >
+                              <XCircle size={14} aria-hidden="true" />
+                              Absent
+                            </button>
+                          )}
+
+                          {record && (
+                            <button
+                              type="button"
+                              onClick={() => setRemoveTarget(employee)}
+                              disabled={isRecording}
+                              className="btn btn-danger-ghost btn-icon btn-sm"
+                              aria-label={`Remove the attendance record for ${employee.first_name} ${employee.last_name}`}
+                              title="Remove this record"
+                            >
+                              <Trash2 size={14} aria-hidden="true" />
+                            </button>
+                          )}
+
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+</tbody>
+            </table></div>
+        )}
+      </section>
+      <AttendanceChart />
+      <MonthlyAttendanceReport />
+
+      {/* Rewritten because the old list described a "Present" button that does
+          not exist on this screen, and promised an export this page never had —
+          the monthly report above it is the thing that exports. */}
+      <div className="alert alert-info" role="note">
+        <AlertCircle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+        <div className="flex-1">
+          <p className="font-medium">Working this screen</p>
+          <ul className="mt-2 space-y-1 text-xs">
+            <li>
+              Pick a date with the arrows or the field above; times are recorded
+              against the Manila clock, not this machine's.
+            </li>
+            <li>
+              Time in and Time out punch one employee. Absent files the day with no
+              times, and can be undone by removing the record.
+            </li>
+            <li>
+              Mark all present times in everyone currently listed who has no record
+              yet, leaving existing punches untouched.
+            </li>
+            <li>Kiosk mode asks for your password, then hands the screen to staff.</li>
+          </ul>
+        </div>
+      </div>
+      {showKioskModal && (
+        <div
+          className="modal-backdrop"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) closeKiosk();
+          }}
+        >
+          <div
+            ref={kioskRef}
+            tabIndex={-1}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="kiosk-title"
+            className="modal-panel max-w-md"
+          >
+            <div className="flex items-start gap-3 border-b border-[rgb(248_250_252/0.1)] px-5 py-4">
+              <span className="kpi-icon bg-[rgb(96_165_250/0.14)] text-info">
+                <Lock size={20} aria-hidden="true" />
+              </span>
+              <div className="min-w-0">
+                <h2 id="kiosk-title" className="section-title">
+                  Admin access required
+                </h2>
+                <p className="page-subtitle mt-0.5">
+                  Kiosk mode leaves this screen unattended
+                </p>
               </div>
             </div>
-
             <form onSubmit={handleLaunchKiosk}>
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Admin Password
+              <div className="px-5 py-4">
+                <label htmlFor="kiosk-password" className="label label-required">
+                  Your password
                 </label>
                 <input
+                  id="kiosk-password"
                   type="password"
                   value={adminPassword}
-                  onChange={(e) => setAdminPassword(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
-                  placeholder="Enter password..."
-                  autoFocus
+                  onChange={(event) => setAdminPassword(event.target.value)}
+                  className={`input ${kioskError ? 'input-invalid' : ''}`}
+                  placeholder="Password for this account"
+                  autoComplete="current-password"
+                  data-autofocus
+                  aria-invalid={kioskError ? 'true' : undefined}
+                  aria-describedby={kioskError ? 'kiosk-error' : 'kiosk-help'}
                 />
-                {kioskError && (
-                  <p className="mt-2 text-sm text-red-600 flex items-center gap-1">
-                    <AlertCircle size={14} />
+                {kioskError ? (
+                  <p id="kiosk-error" className="error-text" role="alert">
+                    <AlertCircle size={13} aria-hidden="true" />
                     {kioskError}
+                  </p>
+                ) : (
+                  <p id="kiosk-help" className="help-text">
+                    Verified against {user?.email || 'the signed-in account'}.
                   </p>
                 )}
               </div>
-
-              <div className="flex gap-3 justify-end mt-6">
+              <div className="flex flex-wrap items-center justify-end gap-2 border-t border-[rgb(248_250_252/0.1)] px-5 py-4">
                 <button
                   type="button"
-                  onClick={() => {
-                    setShowKioskModal(false);
-                    setAdminPassword('');
-                    setKioskError('');
-                  }}
-                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors font-medium"
+                  onClick={closeKiosk}
+                  disabled={isVerifying}
+                  className="btn btn-outline"
                 >
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  disabled={isVerifying}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
-                >
+                <button type="submit" disabled={isVerifying} className="btn btn-primary">
                   {isVerifying ? (
                     <>
-                      <Loader2 size={18} className="animate-spin" />
-                      Verifying...
+                      <Loader2 size={16} className="animate-spin" aria-hidden="true" />
+                      Verifying…
                     </>
                   ) : (
                     <>
-                      Launch Kiosk
+                      <Lock size={16} aria-hidden="true" />
+                      Launch kiosk
                     </>
                   )}
                 </button>
@@ -351,347 +829,37 @@ const Attendance = () => {
           </div>
         </div>
       )}
-      {/* Header */}
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-xl md:text-2xl font-bold text-gray-900">Attendance</h1>
-          <p className="text-gray-600 mt-1">Track and manage employee attendance</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => navigateDate(-1)}
-            className="p-2 hover:bg-gray-100 rounded-lg"
-            title="Previous day"
-          >
-            <ChevronLeft size={20} />
-          </button>
+      {/* Both of these were `window.confirm`. The bulk one is a write worth a
+          second look rather than a destruction, so it is not dressed in red. */}
+      <ConfirmDialog
+        isOpen={bulkConfirm}
+        title="Mark everyone present?"
+        body={`${
+          filteredEmployees.length === totalEmployees
+            ? `All ${totalEmployees} employees`
+            : `The ${filteredEmployees.length} employees currently listed`
+        } will be timed in for ${dayLabel}. Anyone who already has a record for that day keeps it.`}
+        confirmLabel="Mark all present"
+        busyLabel="Marking…"
+        variant="primary"
+        icon={UserCheck}
+        busy={isRecording}
+        onConfirm={handleMarkAllPresent}
+        onCancel={() => setBulkConfirm(false)}
+      />
 
-          <div className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg">
-            <Calendar size={18} className="text-gray-500" />
-            <input
-              type="date"
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              className="bg-transparent outline-none"
-            />
-            {!isToday && (
-              <button
-                onClick={() => setSelectedDate(getManilaDate())}
-                className="text-sm text-blue-600 hover:text-blue-800"
-              >
-                Today
-              </button>
-            )}
-          </div>
-
-          <button
-            onClick={() => navigateDate(1)}
-            className="p-2 hover:bg-gray-100 rounded-lg"
-            title="Next day"
-          >
-            <ChevronRight size={20} />
-          </button>
-
-          <button
-            onClick={loadAttendanceData}
-            disabled={loading}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
-          >
-            <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
-            Refresh
-          </button>
-
-          <button
-            onClick={() => setShowKioskModal(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors shadow-sm ml-2"
-            title="Launch Kiosk Mode"
-          >
-            <Clock size={18} />
-            <span className="hidden md:inline">Kiosk Mode</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-600">Total Employees</p>
-              <p className="text-xl font-bold mt-1">{totalEmployees}</p>
-            </div>
-            <Users className="text-blue-500" size={24} />
-          </div>
-        </div>
-
-        <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-600">Present Today</p>
-              <p className="text-xl font-bold mt-1 text-green-600">{presentCount}</p>
-            </div>
-            <CheckCircle className="text-green-500" size={24} />
-          </div>
-        </div>
-
-        <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-600">Absent Today</p>
-              <p className="text-xl font-bold mt-1 text-red-600">{absentCount}</p>
-            </div>
-            <XCircle className="text-red-500" size={24} />
-          </div>
-        </div>
-
-        <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-600">Attendance Rate</p>
-              <p className="text-xl font-bold mt-1 text-blue-600">
-                {totalEmployees > 0 ? `${((presentCount / totalEmployees) * 100).toFixed(1)}%` : '0%'}
-              </p>
-            </div>
-            <Clock className="text-blue-500" size={24} />
-          </div>
-        </div>
-      </div>
-
-      {/* Filters and Actions */}
-      <div className="bg-white p-4 rounded-xl border border-gray-200">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex flex-col md:flex-row gap-4">
-            {/* Search */}
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
-              <input
-                type="text"
-                placeholder="Search employees..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg w-full md:w-64 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-
-            {/* Department Filter */}
-            <div className="flex items-center gap-2">
-              <Filter size={18} className="text-gray-500" />
-              <select
-                value={filterDepartment}
-                onChange={(e) => setFilterDepartment(e.target.value)}
-                className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="">All Departments</option>
-                {departments.map(dept => (
-                  <option key={dept.id} value={dept.id}>
-                    {dept.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="flex gap-3">
-            <button
-              onClick={handleMarkAllPresent}
-              disabled={isRecording || filteredEmployees.length === 0}
-              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 flex items-center gap-2"
-            >
-              {isRecording ? (
-                <Loader2 size={18} className="animate-spin" />
-              ) : (
-                <CheckCircle size={18} />
-              )}
-              Mark All Present
-            </button>
-
-            <button
-              onClick={() => {
-                setSearchTerm('');
-                setFilterDepartment('');
-              }}
-              className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
-            >
-              Clear Filters
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Attendance Table */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="p-4 border-b border-gray-200 bg-gray-50">
-          <h3 className="font-semibold text-gray-900">
-            Employee Attendance for {new Date(selectedDate).toLocaleDateString('en-US', {
-              weekday: 'long',
-              year: 'numeric',
-              month: 'long',
-              day: 'numeric'
-            })}
-          </h3>
-          <p className="text-sm text-gray-600">
-            Showing {filteredEmployees.length} employee{filteredEmployees.length !== 1 ? 's' : ''}
-          </p>
-        </div>
-
-        {loading ? (
-          <div className="flex items-center justify-center p-12">
-            <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
-          </div>
-        ) : filteredEmployees.length === 0 ? (
-          <div className="text-center py-12">
-            <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No Employees Found</h3>
-            <p className="text-gray-600">Try adjusting your search or filter criteria</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="bg-gray-50 border-b border-gray-200">
-                  <th className="py-3 px-4 text-left text-sm font-semibold text-gray-900">Employee</th>
-                  <th className="py-3 px-4 text-left text-sm font-semibold text-gray-900">Department</th>
-                  <th className="py-3 px-4 text-left text-sm font-semibold text-gray-900">Position</th>
-                  <th className="py-3 px-4 text-left text-sm font-semibold text-gray-900">Check In</th>
-                  <th className="py-3 px-4 text-left text-sm font-semibold text-gray-900">Check Out</th>
-                  <th className="py-3 px-4 text-left text-sm font-semibold text-gray-900">Status</th>
-                  <th className="py-3 px-4 text-left text-sm font-semibold text-gray-900">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredEmployees.map(employee => {
-                  const attendanceRecord = attendanceData.find(record =>
-                    record.employee_id === employee.id
-                  );
-
-                  return (
-                    <tr key={employee.id} className="border-b border-gray-200 hover:bg-gray-50">
-                      <td className="py-4 px-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
-                            <span className="text-sm font-semibold text-blue-600">
-                              {employee.first_name.charAt(0)}{employee.last_name.charAt(0)}
-                            </span>
-                          </div>
-                          <div>
-                            <p className="font-medium text-gray-900">
-                              {employee.first_name} {employee.last_name}
-                            </p>
-                            <p className="text-sm text-gray-600">{employee.company_id}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="py-4 px-4">
-                        <span className="text-gray-900">{employee.department_name || 'No Department'}</span>
-                      </td>
-                      <td className="py-4 px-4">
-                        <span className="text-gray-900">{employee.position}</span>
-                      </td>
-                      <td className="py-4 px-4">
-                        <span className={`font-mono ${attendanceRecord?.check_in ? 'text-gray-900' : 'text-gray-400'}`}>
-                          {formatTime(attendanceRecord?.check_in)}
-                        </span>
-                      </td>
-                      <td className="py-4 px-4">
-                        <span className={`font-mono ${attendanceRecord?.check_out ? 'text-gray-900' : 'text-gray-400'}`}>
-                          {formatTime(attendanceRecord?.check_out)}
-                        </span>
-                      </td>
-                      <td className="py-4 px-4">
-                        {attendanceRecord ? (
-                          <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getStatusColor(attendanceRecord.status)}`}>
-                            {attendanceRecord.status}
-                          </span>
-                        ) : (
-                          <span className="px-3 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-800">
-                            Not Recorded
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-4 px-4">
-                        <div className="flex gap-2">
-                          {!attendanceRecord?.check_in && (
-                            <button
-                              onClick={() => handleTimeIn(employee.id)}
-                              disabled={isRecording || attendanceRecord?.status === 'Absent'}
-                              className="px-3 py-1.5 bg-green-100 text-green-700 rounded-lg text-sm font-medium hover:bg-green-200 disabled:opacity-50 flex items-center gap-1"
-                            >
-                              <Clock size={14} />
-                              Time In
-                            </button>
-                          )}
-
-                          {attendanceRecord?.check_in && !attendanceRecord?.check_out && (
-                            <button
-                              onClick={() => handleTimeOut(employee.id)}
-                              disabled={isRecording}
-                              className="px-3 py-1.5 bg-orange-100 text-orange-700 rounded-lg text-sm font-medium hover:bg-orange-200 disabled:opacity-50 flex items-center gap-1"
-                            >
-                              <Clock size={14} />
-                              Time Out
-                            </button>
-                          )}
-
-                          {attendanceRecord?.status !== 'Absent' && !attendanceRecord?.check_in && (
-                            <button
-                              onClick={() => handleMarkAbsent(employee.id)}
-                              disabled={isRecording}
-                              className="px-3 py-1.5 bg-red-100 text-red-700 rounded-lg text-sm font-medium hover:bg-red-200 disabled:opacity-50 flex items-center gap-1"
-                            >
-                              <XCircle size={14} />
-                              Absent
-                            </button>
-                          )}
-
-                          {attendanceRecord && (
-                            <button
-                              onClick={async () => {
-                                if (window.confirm('Remove attendance record?')) {
-                                  try {
-                                    setIsRecording(true);
-                                    await window.electronAPI.execute('DELETE FROM attendance WHERE employee_id = ? AND date = ?', [employee.id, selectedDate]);
-                                    await loadAttendanceData(selectedDate);
-                                  } catch (err) {
-                                    console.error('Error deleting record:', err);
-                                  } finally {
-                                    setIsRecording(false);
-                                  }
-                                }
-                              }}
-                              disabled={isRecording}
-                              className="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 disabled:opacity-50"
-                            >
-                              Remove
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-      <AttendanceChart />
-      <MonthlyAttendanceReport />
-      {/* Help Section */}
-      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-        <div className="flex items-start gap-3">
-          <AlertCircle className="text-blue-600 mt-0.5 flex-shrink-0" size={20} />
-          <div>
-            <h4 className="font-medium text-blue-900">How to Use Attendance Tracking</h4>
-            <ul className="text-sm text-blue-800 mt-2 space-y-1">
-              <li>• Select a date to view/manage attendance for that day</li>
-              <li>• Click "Present" or "Absent" buttons to mark individual employees</li>
-              <li>• Use "Mark All Present" to quickly mark all employees as present</li>
-              <li>• Search and filter by department to find specific employees</li>
-              <li>• Attendance records are stored in your database and can be exported</li>
-            </ul>
-          </div>
-        </div>
-      </div>
+      <ConfirmDialog
+        isOpen={Boolean(removeTarget)}
+        title="Remove this record?"
+        body={`The attendance row for ${removeTarget?.first_name ?? ''} ${
+          removeTarget?.last_name ?? ''
+        } on ${dayLabel} will be deleted, leaving the day unrecorded. Their punches for other dates are untouched.`}
+        confirmLabel="Remove record"
+        busyLabel="Removing…"
+        busy={isRecording}
+        onConfirm={handleRemoveRecord}
+        onCancel={() => setRemoveTarget(null)}
+      />
     </div>
   );
 };

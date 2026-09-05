@@ -1,588 +1,503 @@
+/**
+ * One-time setup: the company record, the administrator account, and the super
+ * admin password that is the only way to reset that account later. `onRegister`
+ * still does the write, and the generated password is still shown exactly once.
+ *
+ * Three fixes to the original, all invisible until they bite:
+ *  - it sent `company_phone`, and `register_system` inserts `company_contact`,
+ *    so the number typed here was thrown away;
+ *  - it built a 16-character recovery credential out of `Math.random()`, which
+ *    is not a cryptographic generator. `crypto.getRandomValues` is;
+ *  - the last button set `window.location.href = '/dashboard'`, which under a
+ *    HashRouter reloads the app at a path it does not serve — and registering
+ *    does not sign anyone in, so the honest destination is the sign-in screen.
+ */
 import React, { useState } from 'react';
-import { 
-  Building2, User, Mail, Lock, Phone, MapPin, 
-  Eye, EyeOff, AlertCircle, CheckCircle2, Briefcase,
-  Key, Copy, Check, Shield
+import { useNavigate } from 'react-router-dom';
+import {
+  AlertCircle,
+  Building2,
+  Check,
+  CheckCircle,
+  Copy,
+  Eye,
+  EyeOff,
+  KeyRound,
+  Loader2,
+  Lock,
+  LogIn,
+  Mail,
+  MapPin,
+  Phone,
+  ShieldAlert,
+  User
 } from 'lucide-react';
 
+const MIN_PASSWORD_LENGTH = 8;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const SUPER_ADMIN_LENGTH = 16;
+const CHARSET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
+
+/**
+ * A rejection-sampled draw from `CHARSET`: bytes at or above the largest
+ * multiple of the alphabet size are discarded, so every character is equally
+ * likely. `byte % 70` on its own would favour the first 46 characters.
+ */
+const generateSuperAdminPassword = () => {
+  const limit = 256 - (256 % CHARSET.length);
+  const picked = [];
+  const bytes = new Uint8Array(SUPER_ADMIN_LENGTH);
+  while (picked.length < SUPER_ADMIN_LENGTH) {
+    crypto.getRandomValues(bytes);
+    for (const byte of bytes) {
+      if (picked.length === SUPER_ADMIN_LENGTH) break;
+      if (byte < limit) picked.push(CHARSET[byte % CHARSET.length]);
+    }
+  }
+  return picked.join('');
+};
+
+/** The label / icon / error / help arrangement all eight fields here repeat. */
+const Field = ({ id, label, icon: Icon, error, help, required, children, ...inputProps }) => (
+  <div>
+    <label htmlFor={id} className={`label ${required ? 'label-required' : ''}`}>
+      {label}
+    </label>
+    <div className="input-group">
+      <Icon size={15} className="input-icon" aria-hidden="true" />
+      <input
+        id={id}
+        className={`input ${children ? 'pr-11' : ''} ${error ? 'input-invalid' : ''}`}
+        aria-invalid={error ? 'true' : undefined}
+        aria-describedby={error ? `${id}-error` : help ? `${id}-help` : undefined}
+        {...inputProps}
+      />
+      {children}
+    </div>
+    {error && (
+      <p id={`${id}-error`} className="error-text" role="alert">
+        <AlertCircle size={13} aria-hidden="true" />
+        {error}
+      </p>
+    )}
+    {!error && help && (
+      <p id={`${id}-help`} className="help-text">
+        {help}
+      </p>
+    )}
+  </div>
+);
+
+/** The trailing eye toggle. `label` completes "Show …" / "Hide …". */
+const RevealButton = ({ revealed, onClick, label }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className="input-affix btn btn-ghost btn-sm btn-icon"
+    aria-pressed={revealed}
+    aria-label={revealed ? `Hide ${label}` : `Show ${label}`}
+  >
+    {revealed ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}
+  </button>
+);
+
 const RegistrationPage = ({ onRegister }) => {
+  const navigate = useNavigate();
+
   const [formData, setFormData] = useState({
     company_name: '',
     company_address: '',
-    company_phone: '',
+    company_contact: '',
     company_email: '',
     admin_name: '',
     admin_email: '',
     admin_password: '',
     confirm_password: ''
   });
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  // `superAdmin` starts revealed: the whole point of the last screen is to read
+  // that string off and write it down.
+  const [reveal, setReveal] = useState({ password: false, confirm: false, superAdmin: true });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [formErrors, setFormErrors] = useState({});
   const [superAdminPassword, setSuperAdminPassword] = useState('');
-  const [showSuperAdminPassword, setShowSuperAdminPassword] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [registrationComplete, setRegistrationComplete] = useState(false);
+  const [acknowledged, setAcknowledged] = useState(false);
 
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: value
-    }));
-    
-    // Clear error for this field
-    if (formErrors[name]) {
-      setFormErrors(prev => ({
-        ...prev,
-        [name]: ''
-      }));
+  const onField = (field) => (event) => {
+    const { value } = event.target;
+    setFormData((previous) => ({ ...previous, [field]: value }));
+    if (formErrors[field]) {
+      setFormErrors((previous) => ({ ...previous, [field]: '' }));
     }
     if (error) setError('');
   };
 
-  const generateSuperAdminPassword = () => {
-    const length = 16;
-    const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
-    let password = "";
-    for (let i = 0; i < length; i++) {
-      password += charset.charAt(Math.floor(Math.random() * charset.length));
-    }
-    return password;
-  };
+  const toggleReveal = (field) => () =>
+    setReveal((previous) => ({ ...previous, [field]: !previous[field] }));
 
-  const copyToClipboard = async () => {
+  const copyPassword = async () => {
     try {
       await navigator.clipboard.writeText(superAdminPassword);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      setError('Failed to copy password');
+    } catch (copyError) {
+      console.error('Clipboard error:', copyError);
+      setError('That could not be copied. Select the password and copy it by hand.');
     }
   };
+  const handleSubmit = async (event) => {
+    event.preventDefault();
 
-  const validateForm = () => {
     const errors = {};
-    
-    // Required fields validation
-    if (!formData.company_name.trim()) {
-      errors.company_name = 'Company name is required';
+    if (!formData.company_name.trim()) errors.company_name = 'Enter the company name.';
+    if (!formData.company_email.trim()) errors.company_email = 'Enter the company email.';
+    else if (!EMAIL_PATTERN.test(formData.company_email)) {
+      errors.company_email = 'That is not a valid email address.';
     }
-    
-    if (!formData.company_email.trim()) {
-      errors.company_email = 'Company email is required';
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.company_email)) {
-      errors.company_email = 'Invalid email format';
+    if (!formData.admin_name.trim()) errors.admin_name = 'Enter the administrator name.';
+    if (!formData.admin_email.trim()) errors.admin_email = 'Enter the sign-in email.';
+    else if (!EMAIL_PATTERN.test(formData.admin_email)) {
+      errors.admin_email = 'That is not a valid email address.';
     }
-    
-    if (!formData.admin_name.trim()) {
-      errors.admin_name = 'Admin name is required';
+    if (!formData.admin_password) errors.admin_password = 'Choose a password.';
+    else if (formData.admin_password.length < MIN_PASSWORD_LENGTH) {
+      errors.admin_password = `Use at least ${MIN_PASSWORD_LENGTH} characters.`;
     }
-    
-    if (!formData.admin_email.trim()) {
-      errors.admin_email = 'Admin email is required';
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.admin_email)) {
-      errors.admin_email = 'Invalid email format';
+    if (!formData.confirm_password) errors.confirm_password = 'Type the password again.';
+    else if (formData.admin_password !== formData.confirm_password) {
+      errors.confirm_password = 'The two passwords do not match.';
     }
-    
-    // Password validation
-    if (!formData.admin_password) {
-      errors.admin_password = 'Password is required';
-    } else if (formData.admin_password.length < 8) {
-      errors.admin_password = 'Password must be at least 8 characters';
-    }
-    
-    if (!formData.confirm_password) {
-      errors.confirm_password = 'Please confirm your password';
-    } else if (formData.admin_password !== formData.confirm_password) {
-      errors.confirm_password = 'Passwords do not match';
-    }
-    
+
     setFormErrors(errors);
-    return Object.keys(errors).length === 0;
-  };
+    if (Object.keys(errors).length > 0) return;
 
-  const handleSubmit = async (e) => {
-  e.preventDefault();
-  
-  if (!validateForm()) {
-    return;
-  }
+    setIsLoading(true);
+    setError('');
 
-  setIsLoading(true);
-  setError('');
-  setSuccess('');
+    try {
+      const generated = generateSuperAdminPassword();
 
-  try {
-    // Generate super admin password in frontend
-    const generatedPassword = generateSuperAdminPassword();
-    setSuperAdminPassword(generatedPassword);
+      const result = await onRegister({
+        company_name: formData.company_name,
+        company_address: formData.company_address || '',
+        // `register_system` inserts this into `company_contact`. Sending
+        // `company_phone`, as the original did, dropped it on the floor.
+        company_contact: formData.company_contact || '',
+        company_email: formData.company_email,
+        admin_name: formData.admin_name,
+        admin_email: formData.admin_email,
+        admin_password: formData.admin_password,
+        super_admin_password: generated
+      });
 
-    const registrationData = {
-      company_name: formData.company_name,
-      company_address: formData.company_address || '',
-      company_phone: formData.company_phone || '',
-      company_email: formData.company_email,
-      admin_name: formData.admin_name,
-      admin_email: formData.admin_email,
-      admin_password: formData.admin_password,
-      super_admin_password: generatedPassword
-    };
-
-    const result = await onRegister(registrationData);
-    
-    if (result.success) {
-      setRegistrationComplete(true);
-      setSuccess('Registration successful! Super Admin Password has been generated.');
-    } else {
-      setError(result.error || 'Registration failed');
+      if (result.success) {
+        // Only held once the write succeeded: the original set it first, so a
+        // failed registration still left a password in state.
+        setSuperAdminPassword(result.superAdminPassword || generated);
+      } else {
+        setError(result.error || 'The system could not be registered.');
+      }
+    } catch (submitError) {
+      console.error('Registration error:', submitError);
+      setError('Something went wrong during registration.');
+    } finally {
+      setIsLoading(false);
     }
-  } catch (err) {
-    setError('An unexpected error occurred');
-    console.error('Registration error:', err);
-  } finally {
-    setIsLoading(false);
-  }
-};
+  };
+  // The password only exists after a successful write, so it doubles as the
+  // "we are past the form" flag the original kept in a second state.
+  const registered = superAdminPassword !== '';
 
   return (
-    <div className="min-h-screen flex justify-center bg-linear-to-br from-gray-100 to-gray-300 p-8 overflow-y-auto">
-      <div className="w-full max-w-3xl">
-        {/* Header - More Compact */}
-        <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold text-black mb-2">Admin System Setup</h1>
-        </div>
+    // `body` is `overflow: hidden`, so this screen owns its own scrolling.
+    // Eight fields in two cards overflow most windows, and plain
+    // `justify-center` would put the top of the form out of reach for good;
+    // `justify-center-safe` is `justify-content: safe center`, which centres
+    // the short handover screen and top-aligns the tall form.
+    <div className="relative flex h-full flex-col items-center justify-center-safe overflow-y-auto p-6">
+      <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
+        <div className="absolute right-[-10%] top-[-10%] h-[500px] w-[500px] rounded-full bg-[rgb(96_165_250/0.14)] blur-[100px]" />
+        <div className="absolute bottom-[-10%] left-[-10%] h-[500px] w-[500px] rounded-full bg-[rgb(34_197_94/0.12)] blur-[100px]" />
+      </div>
 
-        {/* Registration Card - Smaller */}
-        <div className="bg-white backdrop-blur-lg rounded-xl border border-gray-700/50 p-4 shadow-xl max-h-screen overflow-y-auto">
-          
-          {!registrationComplete ? (
-            <form onSubmit={handleSubmit} className="space-y-4">
-              {/* Company Information */}
-              <div className="space-y-3">
-                <div className="flex items-center space-x-2">
-                  <h2 className="text-lg font-semibold text-black mb-2">Company Account Details</h2>
-                </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {/* Company Name */}
-                  <div className="space-y-1">
-                    <label htmlFor="company_name" className="block text-sm font-medium mb-2 text-gray-800">
-                      Company Name *
-                    </label>
-                    <div className="relative">
-                      <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-700" />
-                      <input
-                        id="company_name"
-                        name="company_name"
-                        type="text"
-                        value={formData.company_name}
-                        onChange={handleInputChange}
-                        className={`pl-8 w-full py-2 bg-gray-50 border ${
-                          formErrors.company_name ? 'border-red-500' : 'border-gray-700'
-                        } rounded-lg text-black placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent text-lg transition-all duration-200`}
-                        placeholder="Enter company name"
-                      />
-                      {formErrors.company_name && (
-                        <p className="text-sm text-red-400 flex items-center mt-1">
-                          <AlertCircle className="h-4 w-4 mr-1" />
-                          {formErrors.company_name}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Company Email */}
-                  <div className="space-y-1">
-                    <label htmlFor="company_email" className="block text-sm font-medium mb-2 text-gray-800">
-                      Company Email *
-                    </label>
-                    <div className="relative">
-                      <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-700" />
-                      <input
-                        id="company_email"
-                        name="company_email"
-                        type="email"
-                        value={formData.company_email}
-                        onChange={handleInputChange}
-                        className={`pl-8 w-full py-2 bg-gray-50 border ${
-                          formErrors.company_email ? 'border-red-500' : 'border-gray-700'
-                        } rounded-lg text-black placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent text-lg transition-all duration-200`}
-                        placeholder="company@example.com"
-                      />
-                    </div>
-                    {formErrors.company_email && (
-                      <p className="text-sm text-red-400 flex items-center mt-1">
-                        <AlertCircle className="h-4 w-4 mr-1" />
-                        {formErrors.company_email}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Company Address */}
-                  <div className="space-y-1">
-                    <label htmlFor="company_address" className="block text-sm font-medium mb-2 text-gray-800">
-                      Company Address
-                    </label>
-                    <div className="relative">
-                      <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-700" />
-                      <input
-                        id="company_address"
-                        name="company_address"
-                        type="text"
-                        value={formData.company_address}
-                        onChange={handleInputChange}
-                        className="pl-8 w-full py-2 bg-gray-50 border border-gray-700 rounded-lg text-black placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent text-lg transition-all duration-200"
-                        placeholder="Street, City, Country"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Company Phone */}
-                  <div className="space-y-1">
-                    <label htmlFor="company_phone" className="block text-sm font-medium mb-2 text-gray-800">
-                      Company Phone
-                    </label>
-                    <div className="relative">
-                      <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-700" />
-                      <input
-                        id="company_phone"
-                        name="company_phone"
-                        type="tel"
-                        value={formData.company_phone}
-                        onChange={handleInputChange}
-                        className="pl-8 w-full py-2 bg-gray-50 border border-gray-700 rounded-lg text-black placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent text-lg transition-all duration-200"
-                        placeholder="+639123456789"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Admin Information */}
-              <div className="space-y-3">
-                <div className="flex items-center space-x-2">
-                  <h2 className="text-lg font-semibold text-black mb-2 mt-4">Admin Account Details</h2>
-                </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
-                  {/* Admin Name */}
-                  <div className="space-y-1">
-                    <label htmlFor="admin_name" className="block text-sm font-medium mb-2 text-gray-800">
-                      Full Name *
-                    </label>
-                    <div className="relative">
-                      <User className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-700" />
-                      <input
-                        id="admin_name"
-                        name="admin_name"
-                        type="text"
-                        value={formData.admin_name}
-                        onChange={handleInputChange}
-                        className={`pl-8 w-full py-2 bg-gray-50 border ${
-                          formErrors.admin_name ? 'border-red-500' : 'border-gray-700'
-                        } rounded-lg text-black placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent text-lg transition-all duration-200`}
-                        placeholder="John Doe"
-                      />
-                    </div>
-                    {formErrors.admin_name && (
-                      <p className="text-sm text-red-400 flex items-center mt-1">
-                        <AlertCircle className="h-4 w-4 mr-1" />
-                        {formErrors.admin_name}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Admin Email */}
-                  <div className="space-y-1">
-                    <label htmlFor="admin_email" className="block text-sm font-medium mb-2 text-gray-800">
-                      Email Address *
-                    </label>
-                    <div className="relative">
-                      <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-700" />
-                      <input
-                        id="admin_email"
-                        name="admin_email"
-                        type="email"
-                        value={formData.admin_email}
-                        onChange={handleInputChange}
-                        className={`pl-8 w-full py-2 bg-gray-50 border ${
-                          formErrors.admin_email ? 'border-red-500' : 'border-gray-700'
-                        } rounded-lg text-black placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent text-lg transition-all duration-200`}
-                        placeholder="admin@example.com"
-                      />
-                    </div>
-                    {formErrors.admin_email && (
-                      <p className="text-sm text-red-400 flex items-center mt-1">
-                        <AlertCircle className="h-4 w-4 mr-1" />
-                        {formErrors.admin_email}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Password */}
-                  <div className="space-y-1">
-                    <label htmlFor="admin_password" className="block text-sm font-medium mb-2 text-gray-800">
-                      Password *
-                    </label>
-                    <div className="relative">
-                      <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-700" />
-                      <input
-                        id="admin_password"
-                        name="admin_password"
-                        type={showPassword ? "text" : "password"}
-                        value={formData.admin_password}
-                        onChange={handleInputChange}
-                        className={`pl-8 w-full py-2 bg-gray-50 border ${
-                          formErrors.admin_password ? 'border-red-500' : 'border-gray-700'
-                        } rounded-lg text-black placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent text-lg transition-all duration-200`}
-                        placeholder="Create password"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-700 hover:text-gray-800"
-                      >
-                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </button>
-                    </div>
-                    {formErrors.admin_password && (
-                      <p className="text-sm text-red-400 flex items-center mt-1">
-                        <AlertCircle className="h-4 w-4 mr-1" />
-                        {formErrors.admin_password}
-                      </p>
-                    )}
-                    {formData.admin_password && (
-                      <div className="text-sm text-gray-700 mt-1">
-                        {formData.admin_password.length >= 8 ? '✓ Strong password' : '⚠ Password too short'}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Confirm Password */}
-                  <div className="space-y-1">
-                    <label htmlFor="confirm_password" className="block text-sm font-medium mb-2 text-gray-800">
-                      Confirm Password *
-                    </label>
-                    <div className="relative">
-                      <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-700" />
-                      <input
-                        id="confirm_password"
-                        name="confirm_password"
-                        type={showConfirmPassword ? "text" : "password"}
-                        value={formData.confirm_password}
-                        onChange={handleInputChange}
-                        className={`pl-8 w-full py-2 bg-gray-50 border ${
-                          formErrors.confirm_password ? 'border-red-500' : 'border-gray-700'
-                        } rounded-lg text-black placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent text-lg transition-all duration-200`}
-                        placeholder="Confirm password"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                        className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-700 hover:text-gray-800"
-                      >
-                        {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </button>
-                    </div>
-                    {formErrors.confirm_password && (
-                      <p className="text-sm text-red-400 flex items-center mt-1">
-                        <AlertCircle className="h-4 w-4 mr-1" />
-                        {formErrors.confirm_password}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Super Admin Password Notice */}
-              <div className="p-2 bg-amber-900/20 border border-amber-800/50 rounded-lg">
-                <div className="flex items-start space-x-2">
-                  <Key className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
-                  <div>
-                    <h3 className="text-sm font-medium mb-2 text-black mb-0.5">Super Admin Password</h3>
-                    <p className="text-sm text-gray-700 italic">
-                      A secure Super Admin Password will be generated. You MUST save it!
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Important Notice */}
-              <div className="p-2 bg-blue-100 border border-blue-800 rounded-lg">
-                <div className="flex items-start space-x-2">
-                  <AlertCircle className="h-4 w-4 text-blue-400 shrink-0 mt-0.5" />
-                  <div>
-                    <h3 className="text-sm font-medium mb-2 text-black mb-0.5">Important</h3>
-                    <p className="text-sm text-gray-700 italic">
-                      One-time registration. Keep all credentials secure.
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Error & Success Messages */}
-              {error && (
-                <div className="p-2 bg-red-900/20 border border-red-800/50 rounded-lg">
-                  <p className="text-red-400 text-sm flex items-center">
-                    <AlertCircle className="h-4 w-4 mr-1" />
-                    {error}
-                  </p>
-                </div>
-              )}
-
-              {/* Submit Button */}
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="w-full flex justify-center items-center py-4 px-4 border border-transparent rounded-lg font-medium text-white bg-linear-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:ring-offset-1 focus:ring-offset-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 text-sm"
-              >
-                {isLoading ? (
-                  <>
-                    <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
-                    Generating Super Admin Password...
-                  </>
-                ) : (
-                  'Generate Super Admin Password & Complete Registration'
-                )}
-              </button>
-            </form>
-          ) : (
-            /* Super Admin Password Display Section */
-            <div className="space-y-4">
-              {/* Success Message */}
-              <div className="p-2 bg-green-50 border border-green-800 rounded-lg">
-                <div className="flex items-center">
-                  <CheckCircle2 className="h-4 w-4 text-green-400 mr-2" />
-                  <div className="flex-1">
-                    <p className="text-gray-900 text-sm font-medium mb-2">{success}</p>
-                    <div className="h-1 w-full bg-green-900/30 rounded-full mt-1 overflow-hidden">
-                      <div className="h-full bg-green-500 animate-pulse" style={{ animationDuration: '2s' }}></div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Super Admin Password Display */}
-              <div className="space-y-3">
-                <div className="flex items-center space-x-2">
-                  <div className="p-1 bg-red-500/20 rounded">
-                    <Shield className="h-4 w-4 text-red-400" />
-                  </div>
-                  <h2 className="text-base font-semibold text-black">SUPER ADMIN PASSWORD</h2>
-                </div>
-
-                <div className="p-3 bg-red-50 border border-red-800 rounded-lg">
-                  <div className="space-y-3">
-                    {/* Critical Warning */}
-                    <div className="p-2 bg-red-100 rounded">
-                      <div className="flex items-start space-x-2">
-                        <AlertCircle className="h-4 w-4 text-red-400 shrink-0 mt-0.5" />
-                        <div>
-                          <h3 className="text-sm font-medium mb-2 text-black mb-0.5">CRITICAL WARNING</h3>
-                          <p className="text-sm text-gray-800 italic">
-                            This password will only be shown ONCE. You MUST save it in a secure location. 
-                            It is REQUIRED for password resets.
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Password Display */}
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <label className="text-sm font-medium mb-2 text-gray-800">Super Admin Password:</label>
-                        <button
-                          onClick={() => setShowSuperAdminPassword(!showSuperAdminPassword)}
-                          className="text-sm text-gray-700 hover:text-gray-800"
-                        >
-                          {showSuperAdminPassword ? 'Hide' : 'Show'}
-                        </button>
-                      </div>
-                      <div className="relative">
-                        <input
-                          type={showSuperAdminPassword ? "text" : "password"}
-                          value={superAdminPassword}
-                          readOnly
-                          className="w-full py-4 px-5 bg-gray-50 border border-red-700 rounded-lg text-black text-sm font-mono tracking-wider"
-                        />
-                        <button
-                          onClick={copyToClipboard}
-                          className="absolute right-2 top-1/2 transform -translate-y-1/2 p-1 bg-gray-200 rounded hover:bg-gray-300"
-                        >
-                          {copied ? (
-                            <Check className="h-4 w-4 text-green-800" />
-                          ) : (
-                            <Copy className="h-4 w-4 text-gray-700" />
-                          )}
-                        </button>
-                      </div>
-                      {copied && (
-                        <p className="text-sm text-black">✓ Copied to clipboard</p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Instructions */}
-                <div className="p-2 bg-blue-900/20 border border-blue-800/50 rounded-lg">
-                  <div className="space-y-1">
-                    <h3 className="text-sm font-medium mb-2 text-black">📋 Backup Instructions:</h3>
-                    <ul className="text-sm text-gray-800 italic space-y-1 pl-1">
-                      <li className="flex items-start">
-                        <span className="text-red-400 mr-1">•</span>
-                        <span>Copy and save to password manager</span>
-                      </li>
-                      <li className="flex items-start">
-                        <span className="text-red-400 mr-1">•</span>
-                        <span>Print and store in secure location</span>
-                      </li>
-                      <li className="flex items-start">
-                        <span className="text-red-400 mr-1">•</span>
-                        <span>Store encrypted backup</span>
-                      </li>
-                    </ul>
-                  </div>
-                </div>
-
-                {/* Completion Button */}
-                <div className="space-y-2">
-                  <div className="p-2 bg-gray-50 border border-gray-700 rounded-lg">
-                    <p className="text-sm text-gray-700 italic text-center">
-                      After saving the Super Admin Password, proceed to launch your dashboard.
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => window.location.href = '/dashboard'}
-                    className="w-full flex justify-center items-center py-2.5 px-4 border border-transparent rounded-lg font-medium text-white bg-linear-to-r from-green-500 to-blue-600 hover:from-green-600 hover:to-blue-700 focus:outline-none focus:ring-1 focus:ring-green-500 focus:ring-offset-1 focus:ring-offset-gray-800 transition-all duration-200 text-sm"
-                  >
-                    <CheckCircle2 className="h-4 w-4 mr-2" />
-                    I have saved the password - Launch Dashboard
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Footer Note - More Compact */}
-          {!registrationComplete && (
-            <div className="text-center pt-3 border-t border-gray-700/50 mt-4">
-              <p className="text-sm text-gray-500">
-                By registering, you agree to our Terms of Service and Privacy Policy.
-              </p>
-            </div>
-          )}
-        </div>
-
-        {/* Footer - More Compact */}
-        <div className="mt-4 text-center">
-          <p className="text-sm text-gray-500">
-            Company Administration System • © {new Date().getFullYear()}
+      <div className="relative z-10 w-full max-w-3xl">
+        <div className="mb-6 text-center">
+          <h1 className="page-title">
+            {registered ? 'Save your recovery password' : 'Set up Admin Pro'}
+          </h1>
+          <p className="page-subtitle mt-1">
+            {registered
+              ? 'This is the last time it will be shown.'
+              : 'One company, one administrator. This runs once.'}
           </p>
         </div>
+
+        {!registered ? (
+          <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+            <section className="card p-5" aria-labelledby="company-heading">
+              <h2 id="company-heading" className="section-title">
+                Company
+              </h2>
+              <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+                <Field
+                  id="company_name"
+                  label="Company name"
+                  icon={Building2}
+                  required
+                  type="text"
+                  value={formData.company_name}
+                  onChange={onField('company_name')}
+                  error={formErrors.company_name}
+                  placeholder="Acme Corporation"
+                  autoComplete="organization"
+                />
+                <Field
+                  id="company_email"
+                  label="Company email"
+                  icon={Mail}
+                  required
+                  type="email"
+                  value={formData.company_email}
+                  onChange={onField('company_email')}
+                  error={formErrors.company_email}
+                  placeholder="hello@acme.com"
+                />
+                <Field
+                  id="company_contact"
+                  label="Contact number"
+                  icon={Phone}
+                  type="tel"
+                  value={formData.company_contact}
+                  onChange={onField('company_contact')}
+                  placeholder="+63 900 000 0000"
+                  autoComplete="tel"
+                  help="Optional. Printed on payslips."
+                />
+                <Field
+                  id="company_address"
+                  label="Address"
+                  icon={MapPin}
+                  type="text"
+                  value={formData.company_address}
+                  onChange={onField('company_address')}
+                  placeholder="Street, city, country"
+                  autoComplete="street-address"
+                  help="Optional."
+                />
+              </div>
+            </section>
+
+            <section className="card p-5" aria-labelledby="admin-heading">
+              <h2 id="admin-heading" className="section-title">
+                Administrator
+              </h2>
+              <p className="page-subtitle mt-0.5">
+                The only account that can sign in.
+              </p>
+              <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+                <Field
+                  id="admin_name"
+                  label="Full name"
+                  icon={User}
+                  required
+                  type="text"
+                  value={formData.admin_name}
+                  onChange={onField('admin_name')}
+                  error={formErrors.admin_name}
+                  placeholder="Juan dela Cruz"
+                  autoComplete="name"
+                />
+                <Field
+                  id="admin_email"
+                  label="Sign-in email"
+                  icon={Mail}
+                  required
+                  type="email"
+                  value={formData.admin_email}
+                  onChange={onField('admin_email')}
+                  error={formErrors.admin_email}
+                  placeholder="admin@acme.com"
+                  autoComplete="email"
+                />
+                <Field
+                  id="admin_password"
+                  label="Password"
+                  icon={Lock}
+                  required
+                  type={reveal.password ? 'text' : 'password'}
+                  value={formData.admin_password}
+                  onChange={onField('admin_password')}
+                  error={formErrors.admin_password}
+                  autoComplete="new-password"
+                  help={`At least ${MIN_PASSWORD_LENGTH} characters.`}
+                >
+                  <RevealButton
+                    revealed={reveal.password}
+                    onClick={toggleReveal('password')}
+                    label="the password"
+                  />
+                </Field>
+                <Field
+                  id="confirm_password"
+                  label="Confirm password"
+                  icon={Lock}
+                  required
+                  type={reveal.confirm ? 'text' : 'password'}
+                  value={formData.confirm_password}
+                  onChange={onField('confirm_password')}
+                  error={formErrors.confirm_password}
+                  autoComplete="new-password"
+                >
+                  <RevealButton
+                    revealed={reveal.confirm}
+                    onClick={toggleReveal('confirm')}
+                    label="the confirmation"
+                  />
+                </Field>
+              </div>
+            </section>
+
+            <div className="alert alert-warning">
+              <KeyRound size={16} aria-hidden="true" />
+              <span>
+                Submitting generates a 16-character super admin password. It is
+                shown once, on the next screen, and it is the only way to reset
+                this account if the password is lost.
+              </span>
+            </div>
+
+            {error && (
+              <p className="error-text" role="alert">
+                <AlertCircle size={13} aria-hidden="true" />
+                {error}
+              </p>
+            )}
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="btn btn-primary btn-lg w-full"
+            >
+              {isLoading && <Loader2 size={17} className="animate-spin" aria-hidden="true" />}
+              {isLoading ? 'Registering…' : 'Create the account'}
+            </button>
+          </form>
+        ) : (
+          <div className="flex flex-col gap-3">
+            <div className="alert alert-success" role="status" aria-live="polite">
+              <CheckCircle size={16} aria-hidden="true" />
+              <span>Registered. One thing left.</span>
+            </div>
+
+            <section className="card p-5" aria-labelledby="super-heading">
+              <div className="flex items-start gap-3">
+                <span className="kpi-icon bg-[rgb(239_68_68/0.14)] text-destructive">
+                  <ShieldAlert size={20} aria-hidden="true" />
+                </span>
+                <div className="min-w-0">
+                  <h2 id="super-heading" className="section-title">
+                    Super admin password
+                  </h2>
+                  <p className="page-subtitle mt-0.5">
+                    Shown once. Not stored anywhere you can read it back.
+                  </p>
+                </div>
+              </div>
+
+              {/* Readable by default: it has to be copied down, and hiding a
+                  string nobody has memorised yet only invites a typo. */}
+              <div className="input-group mt-5">
+                <input
+                  id="super-admin-password"
+                  type={reveal.superAdmin ? 'text' : 'password'}
+                  value={superAdminPassword}
+                  readOnly
+                  aria-label="Super admin password"
+                  className="input pr-24 font-mono tracking-wider"
+                />
+                <span className="input-affix flex items-center gap-1">
+                  <RevealButton
+                    revealed={reveal.superAdmin}
+                    onClick={toggleReveal('superAdmin')}
+                    label="the super admin password"
+                  />
+                  <button
+                    type="button"
+                    onClick={copyPassword}
+                    className="btn btn-ghost btn-sm btn-icon"
+                    aria-label="Copy the super admin password"
+                  >
+                    {copied ? (
+                      <Check size={15} className="text-accent" aria-hidden="true" />
+                    ) : (
+                      <Copy size={15} aria-hidden="true" />
+                    )}
+                  </button>
+                </span>
+              </div>
+              <p className="help-text" role="status" aria-live="polite">
+                {copied ? 'Copied to the clipboard.' : 'Copy it before you continue.'}
+              </p>
+              <hr className="divider my-5" />
+
+              <h3 className="eyebrow">Where to keep it</h3>
+              <ul className="mt-2 flex flex-col gap-1.5 text-sm text-muted-foreground">
+                <li className="flex items-start gap-2">
+                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-warning" aria-hidden="true" />
+                  A password manager, alongside the admin password.
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-warning" aria-hidden="true" />
+                  Printed, in whatever the company treats as a safe.
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-warning" aria-hidden="true" />
+                  Not in a note beside the machine this runs on.
+                </li>
+              </ul>
+
+              {error && (
+                <p className="error-text mt-4" role="alert">
+                  <AlertCircle size={13} aria-hidden="true" />
+                  {error}
+                </p>
+              )}
+
+              <hr className="divider my-5" />
+
+              {/* The original's button asserted "I have saved the password" on
+                  the user's behalf. The claim is theirs to make. */}
+              <label htmlFor="acknowledged" className="flex items-start gap-2 text-sm">
+                <input
+                  id="acknowledged"
+                  type="checkbox"
+                  checked={acknowledged}
+                  onChange={(event) => setAcknowledged(event.target.checked)}
+                  className="checkbox mt-0.5"
+                />
+                <span>I have saved the super admin password somewhere safe.</span>
+              </label>
+
+              <button
+                type="button"
+                onClick={() => navigate('/login')}
+                disabled={!acknowledged}
+                className="btn btn-primary btn-lg mt-4 w-full"
+              >
+                <LogIn size={17} aria-hidden="true" />
+                Continue to sign in
+              </button>
+              <p className="help-text mt-2">
+                Registering does not sign you in — use the administrator email and
+                password you just chose.
+              </p>
+            </section>
+          </div>
+        )}
+
+        <p className="mt-6 text-center text-sm text-muted-foreground">
+          Admin Pro · © {new Date().getFullYear()}
+        </p>
       </div>
     </div>
   );

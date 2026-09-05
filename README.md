@@ -39,7 +39,7 @@ Follow these steps to set up and run the application from scratch.
     | Variable | Description | Required |
     |----------|-------------|----------|
     | `VITE_SUPABASE_URL` | URL of your Supabase project | Yes |
-    | `VITE_SUPABASE_ANONKEY` | Supabase Publishable Key | Yes |
+    | `VITE_SUPABASE_ANON_KEY` | Supabase Publishable Key | Yes |
 
     For more information on how to get these values, please refer to the [SUPABASE_SETUP.md](https://github.com/carlodandan/admin-pro/blob/main/docs/SUPABASE_SETUP.md).
 

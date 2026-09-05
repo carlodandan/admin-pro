@@ -1,5 +1,32 @@
 import React, { useState, useEffect } from 'react';
-import { PhilippinePeso, Download, Printer, Send, CheckCircle, Clock, Calendar } from 'lucide-react';
+import { Calendar, CheckCircle, Clock, Download, PhilippinePeso, RefreshCw } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { downloadCsv, toCsv } from '../../utils/csv';
+import { formatStoredDate, manilaDate } from '../../utils/manila';
+
+const STATUS_BADGE = {
+  Paid: 'badge-accent',
+  Pending: 'badge-warning',
+  Failed: 'badge-danger'
+};
+
+const formatCurrency = (amount) =>
+  new Intl.NumberFormat('en-PH', {
+    style: 'currency',
+    currency: 'PHP',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(amount || 0);
+
+/** `2026-09` → `September 2026`. */
+const monthLabel = (yearMonth) => {
+  const [year, month] = String(yearMonth).split('-').map(Number);
+  if (!year || !month) return yearMonth;
+  return new Date(year, month - 1, 1).toLocaleDateString('en-US', {
+    month: 'long',
+    year: 'numeric'
+  });
+};
 
 const PayrollSummary = () => {
   const [payrollData, setPayrollData] = useState({
@@ -9,9 +36,11 @@ const PayrollSummary = () => {
     pending: 0
   });
   const [loading, setLoading] = useState(true);
-  const [selectedMonth, setSelectedMonth] = useState(
-    new Date().toISOString().split('T')[0].substring(0, 7) // YYYY-MM
-  );
+  // The month picker starts on the current *Manila* month; it used to start on
+  // the UTC one, which is the previous month for the first eight hours of the
+  // 1st. `max` pins it for the same reason.
+  const currentMonth = manilaDate().slice(0, 7);
+  const [selectedMonth, setSelectedMonth] = useState(currentMonth);
 
   useEffect(() => {
     loadPayrollData();
@@ -20,99 +49,59 @@ const PayrollSummary = () => {
   const loadPayrollData = async () => {
     try {
       setLoading(true);
-
-      // Get current month payroll data
       const [year, month] = selectedMonth.split('-').map(Number);
 
-      // Get all payroll records for the selected month
-      const allPayroll = await window.electronAPI.getAllPayroll();
+      // `payroll::summary` filters the cutoff range in SQL. The original pulled
+      // every payroll row and filtered in JS with `new Date(cutoff_start)`,
+      // which parses `YYYY-MM-DD` as UTC midnight and so reported the previous
+      // month for a cutoff starting on the 1st in any negative-offset zone.
+      const records = await window.api.getPayrollSummary(year, month);
 
-      // Filter for the selected month
-      const currentMonthPayroll = allPayroll.filter(p => {
-        const payrollDate = new Date(p.cutoff_start);
-        return payrollDate.getFullYear() === year &&
-          (payrollDate.getMonth() + 1) === month;
-      });
-
-      // Transform data for the component
-      const employees = currentMonthPayroll.map(payroll => ({
+      const employees = (Array.isArray(records) ? records : []).map((payroll) => ({
         id: payroll.id,
-        employee: payroll.employee_name,
-        position: payroll.position,
-        salary: payroll.basic_salary,
+        employee: payroll.employee_name || 'Unnamed employee',
+        position: payroll.position || '—',
+        salary: payroll.basic_salary || 0,
         bonus: payroll.allowances || 0,
         deductions: payroll.deductions || 0,
-        netPay: payroll.net_salary,
+        netPay: payroll.net_salary || 0,
         status: payroll.status || 'Pending',
-        payDate: payroll.payment_date ?
-          new Date(payroll.payment_date).toLocaleDateString('en-PH') :
-          'Not paid',
+        payDate: payroll.payment_date ? formatStoredDate(payroll.payment_date) : 'Not paid',
         cutoffType: payroll.cutoff_type || 'Full Month',
         periodStart: payroll.cutoff_start,
         periodEnd: payroll.cutoff_end
       }));
 
-      // Calculate totals
-      const total = employees.reduce((sum, emp) => sum + emp.netPay, 0);
-      const paid = employees.filter(emp => emp.status === 'Paid').length;
-      const pending = employees.filter(emp => emp.status === 'Pending').length;
-
       setPayrollData({
         employees,
-        total,
-        paid,
-        pending
+        total: employees.reduce((sum, emp) => sum + emp.netPay, 0),
+        paid: employees.filter((emp) => emp.status === 'Paid').length,
+        pending: employees.filter((emp) => emp.status === 'Pending').length
       });
-
     } catch (error) {
       console.error('Error loading payroll data:', error);
-      setPayrollData({
-        employees: [],
-        total: 0,
-        paid: 0,
-        pending: 0
-      });
+      setPayrollData({ employees: [], total: 0, paid: 0, pending: 0 });
     } finally {
       setLoading(false);
     }
   };
 
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-PH', {
-      style: 'currency',
-      currency: 'PHP',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    }).format(amount);
-  };
-
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'Paid': return 'bg-green-100 text-green-800';
-      case 'Pending': return 'bg-yellow-100 text-yellow-800';
-      case 'Failed': return 'bg-red-100 text-red-800';
-      default: return 'bg-gray-100 text-gray-800';
-    }
-  };
-
-  const getStatusIcon = (status) => {
-    switch (status) {
-      case 'Paid': return <CheckCircle size={14} className="mr-1" />;
-      case 'Pending': return <Clock size={14} className="mr-1" />;
-      default: return null;
-    }
-  };
-
   const handleExport = () => {
-    if (payrollData.employees.length === 0) {
-      alert('No data to export');
-      return;
-    }
+    if (payrollData.employees.length === 0) return;
 
-    try {
-      // Convert data to CSV
-      const headers = ['Employee', 'Position', 'Basic Salary', 'Allowances', 'Deductions', 'Net Pay', 'Status', 'Pay Date', 'Cutoff Period'];
-      const csvData = payrollData.employees.map(emp => [
+    const csv = toCsv(
+      [
+        'Employee',
+        'Position',
+        'Basic Salary',
+        'Allowances',
+        'Deductions',
+        'Net Pay',
+        'Status',
+        'Pay Date',
+        'Cutoff Period'
+      ],
+      payrollData.employees.map((emp) => [
         emp.employee,
         emp.position,
         emp.salary,
@@ -122,224 +111,187 @@ const PayrollSummary = () => {
         emp.status,
         emp.payDate,
         emp.cutoffType
-      ]);
+      ])
+    );
 
-      const csvContent = [
-        headers.join(','),
-        ...csvData.map(row => row.join(','))
-      ].join('\n');
-
-      // Create download link
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `payroll-summary-${selectedMonth}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error('Error exporting CSV:', error);
-      alert('Error exporting data: ' + error.message);
-    }
+    downloadCsv(`payroll-summary-${selectedMonth}.csv`, csv);
   };
 
-  const formatDate = (yearMonth) => {
-    const [year, month] = yearMonth.split('-');
-    const date = new Date(year, month - 1);
-    return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-  };
+  const header = (
+    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+      <div className="min-w-0">
+        <h3 className="section-title">Payroll summary</h3>
+        <p className="page-subtitle mt-0.5">{monthLabel(selectedMonth)}</p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="input-group">
+          <Calendar className="input-icon" size={16} aria-hidden="true" />
+          <input
+            type="month"
+            aria-label="Payroll month"
+            value={selectedMonth}
+            max={currentMonth}
+            onChange={(event) => setSelectedMonth(event.target.value || currentMonth)}
+            className="input w-[168px]"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={loadPayrollData}
+          disabled={loading}
+          className="btn btn-ghost btn-icon"
+          aria-label="Refresh payroll data"
+          title="Refresh"
+        >
+          <RefreshCw
+            size={16}
+            aria-hidden="true"
+            className={loading ? 'animate-spin' : undefined}
+          />
+        </button>
+        <button
+          type="button"
+          onClick={handleExport}
+          disabled={payrollData.employees.length === 0}
+          className="btn btn-outline btn-sm"
+        >
+          <Download size={15} aria-hidden="true" />
+          CSV
+        </button>
+        <Link to="/payroll" className="btn btn-secondary btn-sm">
+          Manage
+        </Link>
+      </div>
+    </div>
+  );
 
   if (loading) {
     return (
-      <div className="bg-white rounded-xl border border-gray-200 p-6">
-        <div className="flex justify-between items-center mb-6">
-          <div>
-            <h3 className="text-lg font-semibold">Payroll Summary</h3>
-            <p className="text-gray-600">Loading payroll data...</p>
-          </div>
+      <section className="card p-5">
+        {header}
+        <div className="flex items-center justify-center py-14" role="status" aria-live="polite">
+          <span className="spinner spinner-lg text-accent" aria-hidden="true" />
+          <span className="sr-only">Loading payroll data…</span>
         </div>
-        <div className="flex items-center justify-center p-12">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-        </div>
-      </div>
+      </section>
     );
   }
 
-  if (!payrollData.employees || payrollData.employees.length === 0) {
+  if (payrollData.employees.length === 0) {
     return (
-      <div className="bg-white rounded-xl border border-gray-200 p-6">
-        <div className="flex justify-between items-center mb-6">
-          <div>
-            <h3 className="text-lg font-semibold">Payroll Summary</h3>
-            <p className="text-gray-600">No payroll data available</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <Calendar size={18} className="text-gray-500" />
-              <input
-                type="month"
-                value={selectedMonth}
-                onChange={(e) => setSelectedMonth(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                max={new Date().toISOString().split('T')[0].substring(0, 7)}
-              />
-            </div>
-            <button
-              onClick={loadPayrollData}
-              className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-            >
-              <Clock size={18} />
-              Refresh
-            </button>
-          </div>
+      <section className="card p-5">
+        {header}
+        <div className="empty-state">
+          <span className="empty-state-icon" aria-hidden="true">
+            <PhilippinePeso size={26} />
+          </span>
+          <p className="text-sm">No payroll filed for {monthLabel(selectedMonth)}.</p>
+          <p className="text-xs">Run a cutoff from Payroll to populate this month.</p>
         </div>
-        <div className="text-center py-8 text-gray-500">
-          <PhilippinePeso className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-          <p>Payroll data will appear here once processed</p>
-          <p className="text-sm text-gray-400 mt-2">
-            Process payroll in the Payroll Management section
-          </p>
-        </div>
-      </div>
+      </section>
     );
   }
+
+  const averagePayout = payrollData.total / payrollData.employees.length;
 
   return (
-    <div className="bg-white rounded-3xl border border-gray-100 p-8 shadow-sm">
-      {/* Header Section */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-8">
-        <div>
-          <div className="flex items-center gap-3 mb-2">
-            <div className="bg-blue-600 p-2 rounded-xl text-white shadow-lg shadow-blue-200">
-              <PhilippinePeso size={20} />
-            </div>
-            <h3 className="text-2xl font-black text-gray-900 tracking-tight">Financial Summary</h3>
-          </div>
-          <p className="text-gray-500 font-medium">
-            Overview for {formatDate(selectedMonth)}
+    <section className="card p-5">
+      {header}
+
+      <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-3">
+        <div className="surface px-4 py-3">
+          <p className="kpi-label">Total net pay</p>
+          <p className="kpi-value mt-1">{formatCurrency(payrollData.total)}</p>
+          <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+            <CheckCircle size={14} className="text-accent" aria-hidden="true" />
+            {payrollData.paid} of {payrollData.employees.length} released
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
-          <div className="relative flex-1 md:flex-none">
-            <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-            <input
-              type="month"
-              value={selectedMonth}
-              onChange={(e) => setSelectedMonth(e.target.value)}
-              className="pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-sm font-bold text-gray-700 w-full"
-              max={new Date().toISOString().split('T')[0].substring(0, 7)}
+        <div className="surface px-4 py-3">
+          <p className="kpi-label">Pending</p>
+          <p className="kpi-value mt-1">{payrollData.pending}</p>
+          <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Clock
+              size={14}
+              className={payrollData.pending > 0 ? 'text-warning' : 'text-accent'}
+              aria-hidden="true"
             />
-          </div>
-          <button
-            onClick={handleExport}
-            disabled={payrollData.employees.length === 0}
-            className="flex items-center justify-center gap-2 px-5 py-2.5 border border-gray-100 rounded-xl hover:bg-gray-50 transition-all disabled:opacity-50 text-sm font-bold text-gray-700 md:flex-1"
-          >
-            <Download size={18} />
-            CSV
-          </button>
-          <button
-            onClick={() => window.location.hash = '/payroll'}
-            className="flex items-center justify-center gap-2 px-6 py-2.5 bg-gray-950 text-white rounded-xl hover:bg-gray-800 transition-all shadow-lg shadow-gray-200 text-sm font-bold md:flex-1"
-          >
-            Manage
-          </button>
+            {payrollData.pending > 0 ? 'Awaiting release' : 'All released'}
+          </p>
+        </div>
+
+        <div className="surface px-4 py-3">
+          <p className="kpi-label">Average payout</p>
+          <p className="kpi-value mt-1">{formatCurrency(averagePayout)}</p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Per record this month, not per employee
+          </p>
         </div>
       </div>
 
-      {/* Stats Quick Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-3xl p-6 text-white shadow-xl shadow-blue-100">
-          <p className="text-blue-100 text-xs font-black uppercase tracking-widest mb-1">Total Distribution</p>
-          <h4 className="text-3xl font-black mb-4">{formatCurrency(payrollData.total)}</h4>
-          <div className="flex items-center gap-2 text-xs font-bold bg-white/10 w-fit px-3 py-1.5 rounded-full">
-            <CheckCircle size={14} />
-            {payrollData.paid} Records Cleared
-          </div>
+      <div className="mt-5">
+        <div className="mb-2 flex items-baseline justify-between gap-3">
+          <p className="eyebrow">Latest records</p>
+          {payrollData.employees.length > 5 && (
+            <Link to="/payroll" className="link text-xs">
+              View all {payrollData.employees.length}
+            </Link>
+          )}
         </div>
 
-        <div className="bg-gray-50 rounded-3xl p-6 border border-gray-100">
-          <p className="text-gray-400 text-[10px] font-black uppercase tracking-widest mb-1">Pending Processing</p>
-          <h4 className="text-3xl font-black text-gray-900 mb-4">{payrollData.pending}</h4>
-          <div className={`flex items-center gap-2 text-xs font-bold w-fit px-3 py-1.5 rounded-full ${payrollData.pending > 0 ? 'bg-orange-100 text-orange-600' : 'bg-green-100 text-green-600'}`}>
-            <Clock size={14} />
-            {payrollData.pending > 0 ? 'Awaiting Action' : 'All Processed'}
-          </div>
-        </div>
-
-        <div className="bg-gray-50 rounded-3xl p-6 border border-gray-100">
-          <p className="text-gray-400 text-[10px] font-black uppercase tracking-widest mb-1">Average Payout</p>
-          <h4 className="text-3xl font-black text-gray-900 mb-4">
-            {formatCurrency(payrollData.employees.length > 0 ? payrollData.total / payrollData.employees.length : 0)}
-          </h4>
-          <p className="text-xs text-gray-500 font-medium">Monthly baseline estimation</p>
-        </div>
-      </div>
-
-      <div className="space-y-4">
-        <div className="flex justify-between items-center px-2">
-          <h4 className="text-xs font-black text-gray-400 uppercase tracking-widest">Recent Activity</h4>
-          <p className="text-[10px] font-bold text-blue-600 cursor-pointer hover:underline" onClick={() => window.location.hash = '/payroll'}>View Archive</p>
-        </div>
-
-        <div className="overflow-hidden rounded-2xl border border-gray-100">
-          <table className="w-full">
-            <thead className="bg-gray-50/50 border-b border-gray-100">
+        <div className="table-container">
+          <table className="table">
+            <thead>
               <tr>
-                <th className="py-4 px-6 text-left text-[10px] font-black text-gray-400 uppercase tracking-widest">Staff Member</th>
-                <th className="py-4 px-6 text-left text-[10px] font-black text-gray-400 uppercase tracking-widest">Net Pay</th>
-                <th className="py-4 px-6 text-left text-[10px] font-black text-gray-400 uppercase tracking-widest">Status</th>
-                <th className="py-4 px-6 text-right text-[10px] font-black text-gray-400 uppercase tracking-widest">Dispatch</th>
+                <th scope="col">Employee</th>
+                <th scope="col" className="num">
+                  Net pay
+                </th>
+                <th scope="col">Status</th>
+                <th scope="col">Pay date</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-50">
-              {payrollData.employees.slice(0, 5).map((payroll) => (
-                <tr key={payroll.id} className="group hover:bg-gray-50/50 transition-all">
-                  <td className="py-4 px-6">
+            <tbody>
+              {payrollData.employees.slice(0, 5).map((payroll, index) => (
+                <tr key={payroll.id} className="stagger-row" style={{ '--i': index }}>
+                  <td>
                     <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-[10px] font-black text-gray-500 uppercase">
-                        {payroll.employee.split(' ').map(n => n[0]).join('')}
-                      </div>
-                      <div>
-                        <p className="text-sm font-bold text-gray-900 leading-tight">{payroll.employee}</p>
-                        <p className="text-[10px] text-gray-400 font-medium">{payroll.position}</p>
-                      </div>
+                      <span className="avatar h-8 w-8 text-[11px]">
+                        {payroll.employee
+                          .split(' ')
+                          .filter(Boolean)
+                          .slice(0, 2)
+                          .map((part) => part[0])
+                          .join('')}
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block truncate-1 text-sm font-medium">
+                          {payroll.employee}
+                        </span>
+                        <span className="block truncate-1 text-xs text-muted-foreground">
+                          {payroll.position} · {payroll.cutoffType}
+                        </span>
+                      </span>
                     </div>
                   </td>
-                  <td className="py-4 px-6">
-                    <p className="text-sm font-black text-gray-900">{formatCurrency(payroll.netPay)}</p>
+                  <td className="num font-display font-medium">
+                    {formatCurrency(payroll.netPay)}
                   </td>
-                  <td className="py-4 px-6">
-                    <span className={`inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest ${getStatusColor(payroll.status)}`}>
+                  <td>
+                    <span className={`badge ${STATUS_BADGE[payroll.status] || 'badge-muted'}`}>
                       {payroll.status}
                     </span>
                   </td>
-                  <td className="py-4 px-6 text-right">
-                    <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                      <button
-                        className="p-2 hover:bg-blue-50 rounded-lg text-blue-600"
-                        onClick={() => alert(`Sending payslip to ${payroll.employee}`)}
-                      >
-                        <Send size={16} />
-                      </button>
-                      <button
-                        className="p-2 hover:bg-gray-100 rounded-lg text-gray-500"
-                        onClick={() => alert(`Printing payslip for ${payroll.employee}`)}
-                      >
-                        <Printer size={16} />
-                      </button>
-                    </div>
-                  </td>
+                  <td className="text-sm text-muted-foreground">{payroll.payDate}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </div>
-    </div>
+    </section>
   );
 };
 

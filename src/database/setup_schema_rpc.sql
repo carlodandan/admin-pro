@@ -10,13 +10,15 @@ SECURITY DEFINER -- Runs with privileges of the creator (postgres/service_role)
 AS $$
 BEGIN
   -- 1. Departments
+  -- No `supabase_id` here: that column is the local SQLite side's pointer at
+  -- the cloud row, so a copy of it in the cloud table was never read. Dropping
+  -- it makes this script produce the same schema as supabase_schema.sql.
   EXECUTE 'CREATE TABLE IF NOT EXISTS public.departments (
     id bigint primary key generated always as identity,
     name text not null unique,
     budget numeric(15, 2) default 0,
     created_at timestamp with time zone default timezone(''utc''::text, now()) not null,
-    updated_at timestamp with time zone default timezone(''utc''::text, now()) not null,
-    supabase_id text unique
+    updated_at timestamp with time zone default timezone(''utc''::text, now()) not null
   )';
 
   -- 2. Employees

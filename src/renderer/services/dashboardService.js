@@ -1,7 +1,20 @@
 import DatabaseService from './database';
+import { manilaMonth, manilaYear, relativeFromNow } from '../utils/manila';
 
+/**
+ * The dashboard's read model.
+ *
+ * Three of these figures used to be invented rather than queried:
+ * `getWeeklyAttendance()` filled seven days with `Math.random()`,
+ * `getCurrentMonthPayroll()` took the first five employees and gave each a
+ * random bonus and an alternating Paid/Pending status, and
+ * `calculateMonthlyRevenue()` returned the payroll total times three. The
+ * payroll summary is real now; the fabricated week is gone because
+ * `AttendanceChart` already queries `getWeeklyAttendance()` itself and nothing
+ * read this copy; and the revenue figure is gone rather than corrected —
+ * nothing in this app records revenue, so there was no number to correct it to.
+ */
 class DashboardService {
-  // Get dashboard statistics
   static async getDashboardStats() {
     try {
       const [employees, departments, attendance] = await Promise.all([
@@ -10,36 +23,33 @@ class DashboardService {
         DatabaseService.getTodayAttendance()
       ]);
 
-      // Calculate stats
       const totalEmployees = employees.length;
-      const activeEmployees = employees.filter(e => e.status === 'Active').length;
-      const onLeaveEmployees = employees.filter(e => e.status === 'On Leave').length;
+      const activeEmployees = employees.filter((e) => e.status === 'Active').length;
+      const onLeaveEmployees = employees.filter((e) => e.status === 'On Leave').length;
 
-      // Calculate average salary
+      // `employees.salary` is the *monthly* basic salary: the payroll
+      // calculator divides it by 24 to get a daily rate. Both dashboard cards
+      // used to label this average "Avg. Annual Salary".
       const totalSalary = employees.reduce((sum, emp) => sum + (emp.salary || 0), 0);
-      const avgSalary = employees.length > 0 ? totalSalary / employees.length : 0;
+      const avgSalary = totalEmployees > 0 ? totalSalary / totalEmployees : 0;
 
-      // Calculate today's attendance percentage
-      const today = new Date().toISOString().split('T')[0];
-      const presentToday = attendance.filter(a => a.status === 'Present').length;
-      const attendancePercentage = totalEmployees > 0 ? (presentToday / totalEmployees * 100) : 0;
+      const presentToday = attendance.filter((a) => a.status === 'Present').length;
+      const attendancePercentage =
+        totalEmployees > 0 ? (presentToday / totalEmployees) * 100 : 0;
 
-      // Calculate department distribution
-      const departmentStats = departments.map(dept => ({
+      const departmentStats = departments.map((dept) => ({
         name: dept.name,
-        count: employees.filter(e => e.department_id === dept.id).length,
+        count: employees.filter((e) => e.department_id === dept.id).length,
+        // `departments::get_all` averages the same monthly column.
         avgSalary: dept.avg_salary || 0,
         budget: dept.budget || 0
       }));
 
-      // Get recent activities (simulated - you can create an actual activities table)
-      const recentActivities = await this.getRecentActivities();
-
-      // Get payroll summary for current month
-      const payrollSummary = await this.getCurrentMonthPayroll();
-
-      // Weekly attendance data
-      const weeklyAttendance = await this.getWeeklyAttendance();
+      // Independent queries, so they overlap rather than run in sequence.
+      const [recentActivities, payrollSummary] = await Promise.all([
+        this.getRecentActivities(),
+        this.getCurrentMonthPayroll()
+      ]);
 
       return {
         totalEmployees,
@@ -50,9 +60,7 @@ class DashboardService {
         departmentStats,
         recentActivities,
         payrollSummary,
-        weeklyAttendance,
-        totalDepartments: departments.length,
-        monthlyRevenue: this.calculateMonthlyRevenue(payrollSummary)
+        totalDepartments: departments.length
       };
     } catch (error) {
       console.error('Error fetching dashboard stats:', error);
@@ -60,115 +68,55 @@ class DashboardService {
     }
   }
 
-  // Get weekly attendance data
-  static async getWeeklyAttendance() {
-    try {
-      // This is a simplified version - you should create a proper attendance query
-      const today = new Date();
-      const weekDays = [];
-
-      // Generate last 7 days
-      for (let i = 6; i >= 0; i--) {
-        const date = new Date(today);
-        date.setDate(today.getDate() - i);
-        const dateStr = date.toISOString().split('T')[0];
-
-        // In a real app, you would query the database for each day
-        // For now, simulate data
-        const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
-        const present = Math.floor(Math.random() * 200) + 50;
-        const absent = Math.floor(Math.random() * 20) + 1;
-
-        weekDays.push({
-          day: dayName,
-          date: dateStr,
-          present,
-          absent,
-          total: present + absent
-        });
-      }
-
-      return weekDays;
-    } catch (error) {
-      console.error('Error fetching weekly attendance:', error);
-      return [];
-    }
-  }
-
-  // Get current month payroll summary
+  /** Payroll filed for the current Manila month, from the payroll table. */
   static async getCurrentMonthPayroll() {
+    const empty = { employees: [], total: 0, pending: 0, paid: 0 };
+    if (!window.api) return empty;
+
     try {
-      // In a real app, you would query the payroll table
-      // For now, simulate with employee data
-      const employees = await DatabaseService.getAllEmployees();
+      const records = await window.api.getPayrollSummary(manilaYear(), manilaMonth());
+      if (!Array.isArray(records)) return empty;
 
-      const currentMonth = new Date().getMonth();
-      const currentYear = new Date().getFullYear();
-
-      // Filter employees hired this month (simulated payroll)
-      const payrollEmployees = employees.slice(0, 5).map((emp, index) => ({
-        id: emp.id,
-        employee: `${emp.first_name} ${emp.last_name}`,
-        position: emp.position,
-        salary: emp.salary || 0,
-        bonus: Math.floor(Math.random() * 1000),
-        deductions: Math.floor(Math.random() * 500),
-        status: index % 3 === 0 ? 'Pending' : 'Paid',
-        payDate: `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-28`
+      const payrollEmployees = records.map((record) => ({
+        id: record.id,
+        employee: record.employee_name,
+        position: record.position,
+        salary: record.basic_salary || 0,
+        allowances: record.allowances || 0,
+        deductions: record.deductions || 0,
+        netPay: record.net_salary || 0,
+        status: record.status || 'Pending',
+        payDate: record.payment_date,
+        cutoffType: record.cutoff_type,
+        periodStart: record.cutoff_start,
+        periodEnd: record.cutoff_end
       }));
-
-      const totalPayroll = payrollEmployees.reduce((sum, emp) =>
-        sum + emp.salary + emp.bonus - emp.deductions, 0
-      );
 
       return {
         employees: payrollEmployees,
-        total: totalPayroll,
-        pending: payrollEmployees.filter(e => e.status === 'Pending').length,
-        paid: payrollEmployees.filter(e => e.status === 'Paid').length
+        total: payrollEmployees.reduce((sum, emp) => sum + emp.netPay, 0),
+        pending: payrollEmployees.filter((emp) => emp.status === 'Pending').length,
+        paid: payrollEmployees.filter((emp) => emp.status === 'Paid').length
       };
     } catch (error) {
       console.error('Error fetching payroll summary:', error);
-      return { employees: [], total: 0, pending: 0, paid: 0 };
+      return empty;
     }
   }
 
-  // Calculate monthly revenue (simplified)
-  static calculateMonthlyRevenue(payrollSummary) {
-    // In a real app, this would come from your accounting system
-    // For now, estimate based on payroll
-    return payrollSummary.total * 3;
-  }
-
-  // Get recent activities (real data from DB)
+  /** The activity feed, newest first, with relative times read as Manila. */
   static async getRecentActivities() {
-    if (!window.electronAPI) return [];
+    if (!window.api) return [];
 
     try {
-      const activities = await window.electronAPI.getRecentActivities(10);
+      const activities = await window.api.getRecentActivities(10);
 
-      return activities.map(activity => {
-        // Format relative time (e.g., "5 mins ago")
-        const eventTime = new Date(activity.timestamp);
-        const now = new Date();
-        const diffMs = now - eventTime;
-        const diffMins = Math.floor(diffMs / 60000);
-        const diffHours = Math.floor(diffMins / 60);
-        const diffDays = Math.floor(diffHours / 24);
-
-        let timeStr = 'Just now';
-        if (diffDays > 0) timeStr = `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
-        else if (diffHours > 0) timeStr = `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
-        else if (diffMins > 1) timeStr = `${diffMins} mins ago`;
-        else if (diffMins === 1) timeStr = '1 min ago';
-
-        return {
-          user: `${activity.first_name} ${activity.last_name}`,
-          action: activity.action,
-          time: timeStr,
-          initials: `${activity.first_name?.[0] || ''}${activity.last_name?.[0] || ''}`
-        };
-      });
+      return activities.map((activity) => ({
+        user: `${activity.first_name ?? ''} ${activity.last_name ?? ''}`.trim(),
+        action: activity.action,
+        time: relativeFromNow(activity.timestamp) ?? 'Recently',
+        initials: `${activity.first_name?.[0] || ''}${activity.last_name?.[0] || ''}`
+      }));
     } catch (error) {
       console.error('Error converting recent activities:', error);
       return [];

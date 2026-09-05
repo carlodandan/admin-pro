@@ -13,42 +13,6 @@ export const UserProvider = ({ children }) => {
     loading: true
   });
 
-  useEffect(() => {
-    loadUserProfile();
-
-    // Listen for profile updates from Settings page
-    const handleProfileUpdate = (event) => {
-      if (event.detail) {
-        setUser(prev => ({
-          ...prev,
-          displayName: event.detail.displayName || prev.displayName,
-          avatar: event.detail.avatar || prev.avatar,
-          email: event.detail.email || prev.email,
-          position: event.detail.position || prev.position,
-          department: event.detail.department || prev.department
-        }));
-      }
-    };
-
-    // Listen for avatar updates
-    const handleAvatarUpdate = (event) => {
-      if (event.detail?.avatar) {
-        setUser(prev => ({
-          ...prev,
-          avatar: event.detail.avatar
-        }));
-      }
-    };
-
-    window.addEventListener('profileUpdated', handleProfileUpdate);
-    window.addEventListener('avatarUpdated', handleAvatarUpdate);
-
-    return () => {
-      window.removeEventListener('profileUpdated', handleProfileUpdate);
-      window.removeEventListener('avatarUpdated', handleAvatarUpdate);
-    };
-  }, []);
-
   const loadUserProfile = async () => {
     try {
       const currentUserEmail = getCurrentUserEmail();
@@ -64,12 +28,17 @@ export const UserProvider = ({ children }) => {
         return;
       }
 
-      const userData = await window.electronAPI.getUserSettings(currentUserEmail);
+      // `getUserSettings` returns `{theme_preference, language}` and nothing
+      // else, so the four fields read off it here were all undefined: the
+      // header showed "Administrator" for every account and an uploaded
+      // avatar vanished on the next launch. `getUserProfile` selects the
+      // profile columns, in the database's own snake_case.
+      const userData = await window.api.getUserProfile(currentUserEmail);
 
       if (userData) {
         setUser({
           email: userData.email || currentUserEmail,
-          displayName: userData.displayName || 'Administrator',
+          displayName: userData.display_name || currentUserEmail.split('@')[0],
           avatar: userData.avatar || '',
           position: userData.position || 'System Administrator',
           role: 'Admin',
@@ -116,6 +85,46 @@ export const UserProvider = ({ children }) => {
       return null;
     }
   };
+
+  // Declared after the two functions it calls: the effect body only runs once
+  // the whole provider body has, so either order works at runtime, but reading
+  // a `const` initialised further down is what `react-hooks/immutability`
+  // flags.
+  useEffect(() => {
+    loadUserProfile();
+
+    // Listen for profile updates from Settings page
+    const handleProfileUpdate = (event) => {
+      if (event.detail) {
+        setUser(prev => ({
+          ...prev,
+          displayName: event.detail.displayName || prev.displayName,
+          avatar: event.detail.avatar || prev.avatar,
+          email: event.detail.email || prev.email,
+          position: event.detail.position || prev.position,
+          department: event.detail.department || prev.department
+        }));
+      }
+    };
+
+    // Listen for avatar updates
+    const handleAvatarUpdate = (event) => {
+      if (event.detail?.avatar) {
+        setUser(prev => ({
+          ...prev,
+          avatar: event.detail.avatar
+        }));
+      }
+    };
+
+    window.addEventListener('profileUpdated', handleProfileUpdate);
+    window.addEventListener('avatarUpdated', handleAvatarUpdate);
+
+    return () => {
+      window.removeEventListener('profileUpdated', handleProfileUpdate);
+      window.removeEventListener('avatarUpdated', handleAvatarUpdate);
+    };
+  }, []);
 
   const updateUser = (updates) => {
     setUser(prev => ({ ...prev, ...updates }));

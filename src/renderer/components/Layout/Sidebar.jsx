@@ -11,86 +11,96 @@ import {
   Briefcase,
   Shield
 } from 'lucide-react';
-import { useUser } from '../../contexts/UserContext';
 import adminProLogo from '../../../../icons/adminpro.png';
 
-const Sidebar = ({ isOpen, toggleSidebar }) => {
+const Sidebar = ({ isOpen, toggleSidebar, onNavigate }) => {
   const location = useLocation();
   const currentPath = location.pathname;
-  const { user } = useUser();
 
   const navItems = [
-    { icon: <Home size={20} />, label: 'Dashboard', path: '/dashboard' },
-    { icon: <Users size={20} />, label: 'Employees', path: '/employees' },
-    { icon: <Briefcase size={20} />, label: 'Departments', path: '/departments' },
-    { icon: <Calendar size={20} />, label: 'Attendance', path: '/attendance' },
-    { icon: <CreditCard size={20} />, label: 'Payroll', path: '/payroll' },
-    { icon: <BarChart size={20} />, label: 'Analytics', path: '/analytics' },
-    { icon: <Settings size={20} />, label: 'Settings', path: '/settings' },
-    { icon: <Shield size={20} />, label: 'Admin', path: '#' },
+    { icon: Home, label: 'Dashboard', path: '/dashboard' },
+    { icon: Users, label: 'Employees', path: '/employees' },
+    { icon: Briefcase, label: 'Departments', path: '/departments' },
+    { icon: Calendar, label: 'Attendance', path: '/attendance' },
+    { icon: CreditCard, label: 'Payroll', path: '/payroll' },
+    { icon: BarChart, label: 'Analytics', path: '/analytics' },
+    { icon: Settings, label: 'Settings', path: '/settings' },
+    // Declared with `path: '#'` from the start and never implemented. Rendered
+    // as an unavailable item instead of a link, so it stops silently bouncing
+    // to the dashboard through the catch-all route.
+    { icon: Shield, label: 'Admin', path: '#', disabled: true }
   ];
 
   return (
     <>
-      {/* Mobile overlay */}
+      {/* Off-canvas scrim. Only reachable below the lg breakpoint. */}
       {isOpen && (
         <div
-          className="fixed inset-0 z-40 lg:hidden"
+          className="fixed inset-0 z-40 bg-[rgb(2_6_23/0.6)] backdrop-blur-[2px] lg:hidden"
           onClick={toggleSidebar}
+          aria-hidden="true"
         />
       )}
 
-      {/* Sidebar */}
-      <aside className={`
-        fixed lg:relative lg:flex flex-col
-        inset-y-0 left-0 z-50
-        w-55 bg-linear-to-b from-gray-900 to-gray-800 text-white
-        transform transition-transform duration-200 ease-in-out
-        ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
-      `}>
-        <div className="flex flex-col h-full">
-          {/* Logo */}
-          <div className="p-2.5 border-b border-gray-700">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg overflow-hidden border-2 border-gray-600 flex items-center justify-center">
-                <img src={adminProLogo} alt="Admin Pro" />
-              </div>
-              <div>
-                <h1 className="text-xl font-bold">Admin<span className="text-blue-400">Pro</span></h1>
-              </div>
-            </div>
+      <aside
+        className={`glass fixed inset-y-0 left-0 z-50 flex w-[232px] flex-col border-y-0 border-l-0 transition-transform duration-200 ease-out lg:relative lg:translate-x-0 ${
+          isOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
+        <div className="flex items-center gap-3 border-b border-[rgb(248_250_252/0.09)] px-4 py-4">
+          <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-lg border border-[rgb(248_250_252/0.18)] bg-primary">
+            <img src={adminProLogo} alt="" className="h-full w-full object-contain" />
           </div>
+          <h1 className="font-display text-lg font-semibold tracking-tight">
+            Admin<span className="text-accent">Pro</span>
+          </h1>
+        </div>
 
-          {/* Navigation */}
-          <nav className="flex-1 p-2">
-            <p className="text-xs uppercase text-gray-400 font-semibold mb-4 px-1">Main Menu</p>
-            <ul className="space-y-1">
-              {navItems.map((item, index) => {
-                const isActive = currentPath === item.path ||
+        <nav aria-label="Main" className="flex-1 overflow-y-auto px-3 py-4">
+          <p className="eyebrow mb-3 px-2">Main Menu</p>
+          <ul className="space-y-1">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              const isActive =
+                !item.disabled &&
+                (currentPath === item.path ||
                   (item.path === '/dashboard' && currentPath === '/') ||
-                  currentPath.startsWith(item.path + '/');
+                  currentPath.startsWith(item.path + '/'));
 
+              if (item.disabled) {
                 return (
-                  <li key={index}>
-                    <Link
-                      to={item.path}
-                      className={`flex items-center gap-3 p-3 rounded-lg transition-all duration-200 ${isActive
-                          ? 'bg-gray-800 text-white shadow-lg'
-                          : 'hover:bg-gray-800/50 text-gray-300 hover:text-white'
-                        }`}
-                      onClick={() => window.innerWidth < 1024 && toggleSidebar()}
+                  <li key={item.label}>
+                    <span
+                      className="nav-item cursor-not-allowed opacity-45"
+                      aria-disabled="true"
                     >
-                      <div className={`p-1 rounded-md ${isActive ? 'bg-blue-500' : 'bg-gray-700'}`}>
-                        {item.icon}
-                      </div>
-                      <span className="text-white font-xs">{item.label}</span>
-                    </Link>
+                      <Icon size={18} className="nav-icon" aria-hidden="true" />
+                      <span className="flex-1">{item.label}</span>
+                      <span className="pill">Soon</span>
+                    </span>
                   </li>
                 );
-              })}
-            </ul>
-          </nav>
-        </div>
+              }
+
+              return (
+                <li key={item.label}>
+                  <Link
+                    to={item.path}
+                    // Below `lg` the drawer sits over the content, so following
+                    // a link has to close it or the next screen is hidden
+                    // behind it.
+                    onClick={onNavigate}
+                    aria-current={isActive ? 'page' : undefined}
+                    className={`nav-item ${isActive ? 'nav-item-active' : ''}`}
+                  >
+                    <Icon size={18} className="nav-icon" aria-hidden="true" />
+                    <span>{item.label}</span>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </nav>
       </aside>
     </>
   );

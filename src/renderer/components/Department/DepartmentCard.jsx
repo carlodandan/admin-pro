@@ -1,74 +1,90 @@
 import React from 'react';
-import { Users, PhilippinePeso, Edit } from 'lucide-react';
+import { PhilippinePeso, Users } from 'lucide-react';
 import DeleteDepartment from './DeleteDepartment';
+import { formatUtcStoredDate } from '../../utils/manila';
 
-const DepartmentCard = ({ 
-  department, 
-  onEdit, 
-  onDeleteSuccess, 
-  onDeleteError 
-}) => {
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-PH', {
-      style: 'currency',
-      currency: 'PHP',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0
-    }).format(amount);
-  };
+const formatCurrency = (amount) =>
+  new Intl.NumberFormat('en-PH', {
+    style: 'currency',
+    currency: 'PHP',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0
+  }).format(amount || 0);
+
+/**
+ * One department.
+ *
+ * The Edit button beside Delete is gone. It called an `onEdit` handler whose
+ * whole body set the page's *error* banner to "Edit functionality for X would go
+ * here", and there is no update command behind it to call.
+ */
+const DepartmentCard = ({ department, share = 0, index = 0, onDeleteSuccess, onDeleteError }) => {
+  const headcount = department.employee_count || 0;
+  // `budget` went to `Intl.NumberFormat` unguarded, so a row with a null budget
+  // printed "₱NaN".
+  const budget = Number(department.budget) || 0;
 
   return (
-    <div className="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-md transition-shadow">
-      <div className="flex justify-between items-start mb-4">
-        <div>
-          <h3 className="font-bold text-lg text-gray-900">{department.name}</h3>
+    <li className="card stagger-card flex flex-col gap-4 p-5" style={{ '--i': index }}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="section-title truncate-2">{department.name}</h3>
+          <p className="page-subtitle mt-0.5">
+            {headcount === 1 ? '1 active employee' : `${headcount} active employees`}
+          </p>
         </div>
-        <div className="flex gap-2">
-          <button 
-            onClick={() => onEdit(department)}
-            className="p-2 hover:bg-gray-100 rounded-lg"
-            title={`Edit ${department.name}`}
+        <DeleteDepartment
+          departmentId={department.id}
+          departmentName={department.name}
+          onDeleteSuccess={onDeleteSuccess}
+          onDeleteError={onDeleteError}
+        />
+      </div>
+
+      <div>
+        <p className="kpi-label">Annual budget</p>
+        <p className="kpi-value mt-1">{formatCurrency(budget)}</p>
+        {/* Share of the combined budget across all departments — the comparison
+            the old three-row grid of figures left the reader to do. */}
+        <div className="mt-2.5">
+          <div
+            className="progress"
+            role="progressbar"
+            aria-valuenow={Math.round(share)}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label={`${department.name} share of the combined annual budget`}
           >
-            <Edit size={16} className="text-blue-600" />
-          </button>
-          <DeleteDepartment
-            departmentId={department.id}
-            departmentName={department.name}
-            onDeleteSuccess={onDeleteSuccess}
-            onDeleteError={onDeleteError}
-          />
-        </div>
-      </div>
-      
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <PhilippinePeso size={16} className="text-green-600" />
-            <span className="text-sm text-gray-600">Annual Budget</span>
+            <div className="progress-bar" style={{ width: `${Math.min(100, share)}%` }} />
           </div>
-          <span className="font-bold text-gray-900">{formatCurrency(department.budget)}</span>
-        </div>
-        
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Users size={16} className="text-blue-600" />
-            <span className="text-sm text-gray-600">Employees</span>
-          </div>
-          <span className="font-bold text-gray-900">{department.employee_count || 0}</span>
-        </div>
-        
-        <div className="flex items-center justify-between">
-          <span className="text-sm text-gray-600">Avg. Salary</span>
-          <span className="font-bold text-gray-900">{formatCurrency(department.avg_salary || 0)}</span>
+          <p className="help-text mt-1.5">{share.toFixed(1)}% of the combined budget</p>
         </div>
       </div>
-      
-      <div className="mt-4 pt-4 border-t border-gray-200">
-        <div className="text-xs text-gray-500">
-          Created: {new Date(department.created_at).toLocaleDateString()}
+
+      <dl className="mt-auto flex flex-col">
+        <div className="field-row">
+          <dt className="field-key flex items-center gap-2">
+            <Users size={14} className="text-info" aria-hidden="true" />
+            Active employees
+          </dt>
+          <dd className="field-value">{headcount}</dd>
         </div>
-      </div>
-    </div>
+        <div className="field-row">
+          <dt className="field-key flex items-center gap-2">
+            <PhilippinePeso size={14} className="text-accent" aria-hidden="true" />
+            {/* `AVG(e.salary)` over a column the payroll calculator divides by
+                24 to get a daily rate: this is a monthly figure, and "Avg.
+                Salary" left that to the reader. */}
+            Avg. monthly salary
+          </dt>
+          <dd className="field-value">{formatCurrency(department.avg_salary)}</dd>
+        </div>
+        <div className="field-row">
+          <dt className="field-key">Created</dt>
+          <dd className="field-value">{formatUtcStoredDate(department.created_at)}</dd>
+        </div>
+      </dl>
+    </li>
   );
 };
 

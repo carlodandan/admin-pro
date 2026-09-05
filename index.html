@@ -1,17 +1,15 @@
 <!doctype html>
-<html>
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" 
-        content="default-src 'self'; 
-                 img-src 'self' data: blob:; 
-                 script-src 'self' 'unsafe-inline'; 
-                 style-src 'self' 'unsafe-inline'; 
-                 connect-src 'self'">
-    <meta http-equiv="X-Content-Security-Policy"
-        content="default-src 'self'; script-src 'self'"
-    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      The Content-Security-Policy used to live here as a `<meta>` tag. Tauri
+      injects the policy from `src-tauri/tauri.conf.json` instead, and when both
+      are present the browser intersects them — the stricter `script-src 'self'`
+      from the old `X-Content-Security-Policy` tag would have blocked nothing
+      here but would have silently diverged from the real policy. One source.
+    -->
     <title>Admin Pro</title>
   </head>
   <body>

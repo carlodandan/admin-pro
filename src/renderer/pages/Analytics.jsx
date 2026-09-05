@@ -1,457 +1,552 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-    BarChart, TrendingUp, Users, DollarSign, Briefcase,
-    Calendar, Loader2, RefreshCw, Filter, PieChart
+  AlertCircle,
+  Briefcase,
+  CalendarDays,
+  PhilippinePeso,
+  PieChart,
+  RefreshCw,
+  TrendingUp,
+  Users
 } from 'lucide-react';
+import { manilaDate, manilaDateDaysAgo } from '../utils/manila';
+
+/** The four presets the filter offers. */
+const RANGES = [
+  { label: 'All time', value: 'all' },
+  { label: '30 days', value: '30' },
+  { label: '60 days', value: '60' },
+  { label: '90 days', value: '90' }
+];
+
+/**
+ * Status → the dot in the legend and the arc in the ring.
+ *
+ * The ring used to take its colours from a positional array and the legend from
+ * a separate map keyed by status, so the two disagreed as soon as a status was
+ * missing from the data. One map now feeds both, and an unknown status falls
+ * back to the muted tone rather than to "Inactive" red.
+ */
+const STATUS_TONE = {
+  Active: { dot: 'bg-accent', stroke: 'var(--color-accent)' },
+  'On Leave': { dot: 'bg-warning', stroke: 'var(--color-warning)' },
+  Inactive: { dot: 'bg-destructive', stroke: 'var(--color-destructive)' },
+  Terminated: { dot: 'bg-muted-foreground', stroke: 'var(--color-muted-foreground)' }
+};
+
+const FALLBACK_TONE = { dot: 'bg-info', stroke: 'var(--color-info)' };
+
+const toneFor = (status) => STATUS_TONE[status] ?? FALLBACK_TONE;
+
+const num = (value) => Number(value) || 0;
+
+/** `₱42,500` — whole pesos, as the original did. */
+const formatCurrency = (value) =>
+  new Intl.NumberFormat('en-PH', {
+    style: 'currency',
+    currency: 'PHP',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0
+  }).format(num(value));
+
+/**
+ * `₱1.2M` — the label that sits above a bar, where the full figure would be
+ * wider than the column. The exact amount stays in the bar's own description.
+ */
+const compactCurrency = (value) => {
+  const amount = num(value);
+  if (Math.abs(amount) >= 1_000_000) return `₱${(amount / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(amount) >= 1_000) return `₱${Math.round(amount / 1_000)}K`;
+  return `₱${Math.round(amount)}`;
+};
+
+/** `Sep 26` from the `YYYY-MM` that `strftime` returns. */
+const formatMonth = (value) => {
+  if (!value) return '';
+  const [year, month] = String(value).split('-').map(Number);
+  if (!year || !month) return String(value);
+  return new Date(year, month - 1, 1).toLocaleDateString('en-US', {
+    month: 'short',
+    year: '2-digit'
+  });
+};
+
+/**
+ * One column chart.
+ *
+ * Each column carries its value as text as well as its height, because the
+ * original showed the figure on hover alone — which a touch screen and a screen
+ * reader both miss — and `title` is the only description a bare `div` has.
+ */
+const ColumnChart = ({ rows, label }) => (
+  <div className="flex h-44 items-end gap-2" role="list" aria-label={label}>
+    {rows.map((row) => (
+      <div key={row.key} className="flex min-w-0 flex-1 flex-col items-center gap-1" role="listitem">
+        <span className="tnum truncate text-[10px] text-muted-foreground">{row.valueLabel}</span>
+        <div className="flex h-full w-full items-end">
+          <div
+            className={`w-full rounded-t-[6px] transition-[height] duration-300 ease-out ${row.tone}`}
+            style={{ height: `${row.percent}%`, minHeight: row.percent > 0 ? '6px' : '2px' }}
+            title={row.tip}
+            role="img"
+            aria-label={row.tip}
+          />
+        </div>
+        <span className="truncate text-[11px] text-muted-foreground">{row.label}</span>
+        {row.sub && <span className="truncate text-[10px] text-muted-foreground/70">{row.sub}</span>}
+      </div>
+    ))}
+  </div>
+);
+
+/** A labelled horizontal bar, the shape the rest of the app uses for shares. */
+const BarRow = ({ title, value, percent, tone, footLeft, footRight, description }) => (
+  <div>
+    <div className="flex items-baseline justify-between gap-3">
+      <span className="truncate-1 text-sm font-medium">{title}</span>
+      <span className="tnum text-sm font-semibold">{value}</span>
+    </div>
+    <div
+      className="progress mt-1.5"
+      role="progressbar"
+      aria-valuenow={Math.round(percent)}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-label={description}
+    >
+      <div className={`progress-bar ${tone}`} style={{ width: `${Math.min(100, percent)}%` }} />
+    </div>
+    {(footLeft || footRight) && (
+      <div className="mt-1.5 flex items-baseline justify-between gap-3 text-xs text-muted-foreground">
+        <span className="truncate-1">{footLeft}</span>
+        <span className="tnum shrink-0">{footRight}</span>
+      </div>
+    )}
+  </div>
+);
+
+/** An empty chart slot, so a section with no rows keeps the card's height. */
+const NoData = ({ message }) => (
+  <div className="flex h-44 items-center justify-center">
+    <p className="text-sm text-muted-foreground">{message}</p>
+  </div>
+);
 
 const Analytics = () => {
-    const [data, setData] = useState(null);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
-    const [dateRange, setDateRange] = useState('all'); // 'all', '30', '60', '90', 'custom'
-    const [customStart, setCustomStart] = useState('');
-    const [customEnd, setCustomEnd] = useState('');
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [dateRange, setDateRange] = useState('all');
 
-    useEffect(() => {
-        loadAnalytics();
-    }, [dateRange]);
+  useEffect(() => {
+    loadAnalytics();
+  }, [dateRange]);
 
-    const getDateFilters = () => {
-        if (dateRange === 'all') return {};
-        if (dateRange === 'custom' && customStart && customEnd) {
-            return { startDate: customStart, endDate: customEnd };
-        }
-        const now = new Date();
-        const start = new Date(now);
-        start.setDate(now.getDate() - parseInt(dateRange));
-        return { startDate: start.toISOString().split('T')[0], endDate: now.toISOString().split('T')[0] };
-    };
+  /**
+   * The window the filter names, as Manila calendar dates.
+   *
+   * This was `new Date()` stepped back by `setDate` and read out with
+   * `toISOString()` — the UTC date, so between midnight and 08:00 Manila both
+   * ends of the range named the day before. `attendance.date` and
+   * `payroll.cutoff_start` are Manila dates, so the comparison has to be too.
+   */
+  const dateFilters = () => {
+    if (dateRange === 'all') return {};
+    return { startDate: manilaDateDaysAgo(Number(dateRange)), endDate: manilaDate() };
+  };
 
-    const loadAnalytics = async () => {
-        try {
-            setLoading(true);
-            setError(null);
-            const filters = getDateFilters();
-            const result = await window.electronAPI.getAnalyticsData(filters);
-            setData(result);
-        } catch (err) {
-            console.error('Error loading analytics:', err);
-            setError('Failed to load analytics data.');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const formatCurrency = (value) => {
-        return new Intl.NumberFormat('en-PH', {
-            style: 'currency', currency: 'PHP', minimumFractionDigits: 0
-        }).format(value || 0);
-    };
-
-    const formatMonth = (monthStr) => {
-        if (!monthStr) return '';
-        const [year, month] = monthStr.split('-');
-        const date = new Date(year, parseInt(month) - 1);
-        return date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
-    };
-
-    if (loading) {
-        return (
-            <div className="flex items-center justify-center h-96">
-                <div className="text-center">
-                    <Loader2 className="h-8 w-8 animate-spin text-blue-500 mx-auto mb-4" />
-                    <p className="text-gray-600">Loading analytics data...</p>
-                </div>
-            </div>
-        );
+  const loadAnalytics = async () => {
+    try {
+      setLoading(true);
+      setError('');
+      const result = await window.api.getAnalyticsData(dateFilters());
+      setData(result);
+    } catch (loadError) {
+      console.error('Error loading analytics:', loadError);
+      setError('Could not read the analytics data.');
+    } finally {
+      setLoading(false);
     }
+  };
 
-    if (error) {
-        return (
-            <div className="flex items-center justify-center h-96">
-                <div className="text-center">
-                    <div className="text-red-500 mb-4 text-4xl">⚠️</div>
-                    <p className="text-gray-600 mb-4">{error}</p>
-                    <button onClick={loadAnalytics} className="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600">
-                        Retry
-                    </button>
-                </div>
-            </div>
-        );
-    }
+  const {
+    employeeGrowth = [],
+    attendanceTrends = [],
+    payrollCostTrends = [],
+    departmentComparison = [],
+    employeeStatusBreakdown = [],
+    salaryDistribution = []
+  } = data || {};
 
-    const {
-        employeeGrowth = [],
-        attendanceTrends = [],
-        payrollCostTrends = [],
-        departmentComparison = [],
-        employeeStatusBreakdown = [],
-        salaryDistribution = []
-    } = data || {};
+  // `Math.max(...[])` is `-Infinity`, which turns every height into `NaN%`; the
+  // trailing 1 is the original's guard and is kept.
+  const maxGrowth = Math.max(...employeeGrowth.map((row) => num(row.count)), 1);
+  const maxPayroll = Math.max(...payrollCostTrends.map((row) => num(row.total_net)), 1);
+  const maxHeadcount = Math.max(...departmentComparison.map((row) => num(row.headcount)), 1);
+  const maxSalaryCount = Math.max(...salaryDistribution.map((row) => num(row.count)), 1);
 
-    // Status colors
-    const statusColors = {
-        'Active': { bg: 'bg-green-500', light: 'bg-green-100', text: 'text-green-700' },
-        'On Leave': { bg: 'bg-yellow-500', light: 'bg-yellow-100', text: 'text-yellow-700' },
-        'Inactive': { bg: 'bg-red-500', light: 'bg-red-100', text: 'text-red-700' },
-        'Terminated': { bg: 'bg-gray-500', light: 'bg-gray-100', text: 'text-gray-700' },
+  const totalEmployees = employeeStatusBreakdown.reduce((sum, row) => sum + num(row.count), 0);
+  const totalHires = employeeGrowth.reduce((sum, row) => sum + num(row.count), 0);
+  const totalPayroll = payrollCostTrends.reduce((sum, row) => sum + num(row.total_net), 0);
+  const paidCount = payrollCostTrends.reduce((sum, row) => sum + num(row.paid_count), 0);
+  const pendingCount = payrollCostTrends.reduce((sum, row) => sum + num(row.pending_count), 0);
+  const latestRate = num(attendanceTrends[attendanceTrends.length - 1]?.attendance_rate);
+
+  const growthRows = employeeGrowth.map((row, index) => ({
+    key: row.month ?? index,
+    label: formatMonth(row.month),
+    valueLabel: num(row.count),
+    percent: (num(row.count) / maxGrowth) * 100,
+    tone: 'bg-info',
+    tip: `${num(row.count)} hired in ${formatMonth(row.month)}, ${num(row.active_count)} still active`
+  }));
+
+  const attendanceRows = attendanceTrends.map((row, index) => {
+    const rate = num(row.attendance_rate);
+    return {
+      key: row.month ?? index,
+      label: formatMonth(row.month),
+      valueLabel: `${rate}%`,
+      percent: rate,
+      tone: rate >= 90 ? 'bg-accent' : rate >= 70 ? 'bg-warning' : 'bg-destructive',
+      tip: `${rate}% present in ${formatMonth(row.month)} — ${num(row.present)} of ${num(row.total_records)} records`
     };
+  });
 
-    const totalEmployees = employeeStatusBreakdown.reduce((sum, s) => sum + s.count, 0);
-    const maxGrowth = Math.max(...employeeGrowth.map(d => d.count), 1);
-    const maxAttendanceRecords = Math.max(...attendanceTrends.map(d => d.total_records), 1);
-    const maxPayroll = Math.max(...payrollCostTrends.map(d => d.total_net), 1);
-    const maxDeptHeadcount = Math.max(...departmentComparison.map(d => d.headcount), 1);
-    const maxSalaryCount = Math.max(...salaryDistribution.map(d => d.count), 1);
+  const payrollRows = payrollCostTrends.map((row, index) => ({
+    key: row.month ?? index,
+    label: formatMonth(row.month),
+    sub: `${num(row.employee_count)} emp`,
+    valueLabel: compactCurrency(row.total_net),
+    percent: (num(row.total_net) / maxPayroll) * 100,
+    tone: 'bg-accent',
+    tip: `${formatMonth(row.month)} — net ${formatCurrency(row.total_net)}, basic ${formatCurrency(
+      row.total_basic
+    )}, deductions ${formatCurrency(row.total_deductions)}`
+  }));
 
-    return (
-        <div className="space-y-6">
-            {/* Header */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div>
-                    <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                        <BarChart className="text-blue-500" size={28} />
-                        Analytics
-                    </h1>
-                    <p className="text-sm text-gray-500 mt-1">
-                        Historical trends and insights across your workforce data.
-                    </p>
-                </div>
-                <div className="flex items-center gap-3 flex-wrap">
-                    {/* Date range filter */}
-                    <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl p-1">
-                        <Filter size={16} className="text-gray-400 ml-2" />
-                        {[
-                            { label: 'All Time', value: 'all' },
-                            { label: '30 Days', value: '30' },
-                            { label: '60 Days', value: '60' },
-                            { label: '90 Days', value: '90' },
-                        ].map(opt => (
-                            <button
-                                key={opt.value}
-                                onClick={() => setDateRange(opt.value)}
-                                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${dateRange === opt.value
-                                        ? 'bg-blue-500 text-white shadow-sm'
-                                        : 'text-gray-600 hover:bg-gray-100'
-                                    }`}
-                            >
-                                {opt.label}
-                            </button>
-                        ))}
-                    </div>
-                    <button
-                        onClick={loadAnalytics}
-                        className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-colors"
-                    >
-                        <RefreshCw size={16} />
-                        Refresh
-                    </button>
-                </div>
-            </div>
-
-            {/* Row 1: Employee Growth + Attendance Trends */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Employee Growth Trend */}
-                <div className="bg-white rounded-xl border border-gray-200 p-6">
-                    <div className="flex items-center justify-between mb-4">
-                        <div>
-                            <h3 className="font-bold text-lg flex items-center gap-2">
-                                <Users size={20} className="text-blue-500" />
-                                Employee Growth
-                            </h3>
-                            <p className="text-sm text-gray-500">Monthly new hires over time</p>
-                        </div>
-                        <span className="text-2xl font-bold text-blue-600">
-                            {employeeGrowth.reduce((s, d) => s + d.count, 0)}
-                        </span>
-                    </div>
-                    {employeeGrowth.length > 0 ? (
-                        <div className="h-48 flex items-end gap-2 px-2">
-                            {employeeGrowth.map((item, i) => (
-                                <div key={i} className="flex-1 flex flex-col items-center group">
-                                    <div className="relative w-full flex flex-col justify-end h-40">
-                                        <div
-                                            className="w-full bg-blue-500 rounded-t-md hover:bg-blue-600 transition-all duration-300 cursor-pointer relative"
-                                            style={{ height: `${(item.count / maxGrowth) * 100}%`, minHeight: item.count > 0 ? '8px' : '0' }}
-                                            title={`${item.count} new employee(s) in ${formatMonth(item.month)}`}
-                                        >
-                                            <span className="absolute -top-5 left-1/2 -translate-x-1/2 text-xs font-semibold text-gray-700 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                {item.count}
-                                            </span>
-                                        </div>
-                                    </div>
-                                    <span className="mt-2 text-xs text-gray-500 font-medium">{formatMonth(item.month)}</span>
-                                </div>
-                            ))}
-                        </div>
-                    ) : (
-                        <div className="h-48 flex items-center justify-center text-gray-400">
-                            <p>No employee data available for this period</p>
-                        </div>
-                    )}
-                </div>
-
-                {/* Attendance Rate Trends */}
-                <div className="bg-white rounded-xl border border-gray-200 p-6">
-                    <div className="flex items-center justify-between mb-4">
-                        <div>
-                            <h3 className="font-bold text-lg flex items-center gap-2">
-                                <Calendar size={20} className="text-green-500" />
-                                Attendance Trends
-                            </h3>
-                            <p className="text-sm text-gray-500">Monthly attendance rate (%)</p>
-                        </div>
-                        {attendanceTrends.length > 0 && (
-                            <span className="text-2xl font-bold text-green-600">
-                                {attendanceTrends[attendanceTrends.length - 1]?.attendance_rate || 0}%
-                            </span>
-                        )}
-                    </div>
-                    {attendanceTrends.length > 0 ? (
-                        <>
-                            <div className="h-40 flex items-end gap-2 px-2">
-                                {attendanceTrends.map((item, i) => {
-                                    const rate = item.attendance_rate || 0;
-                                    const color = rate >= 90 ? 'bg-green-500 hover:bg-green-600' :
-                                        rate >= 70 ? 'bg-yellow-500 hover:bg-yellow-600' :
-                                            'bg-red-500 hover:bg-red-600';
-                                    return (
-                                        <div key={i} className="flex-1 flex flex-col items-center group">
-                                            <div className="relative w-full flex flex-col justify-end h-32">
-                                                <div
-                                                    className={`w-full ${color} rounded-t-md transition-all duration-300 cursor-pointer relative`}
-                                                    style={{ height: `${rate}%`, minHeight: rate > 0 ? '8px' : '0' }}
-                                                    title={`${rate}% attendance in ${formatMonth(item.month)} (${item.present} present / ${item.total_records} total)`}
-                                                >
-                                                    <span className="absolute -top-5 left-1/2 -translate-x-1/2 text-xs font-semibold text-gray-700 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                                                        {rate}%
-                                                    </span>
-                                                </div>
-                                            </div>
-                                            <span className="mt-2 text-xs text-gray-500 font-medium">{formatMonth(item.month)}</span>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                            {/* Legend */}
-                            <div className="flex items-center gap-4 mt-4 text-xs text-gray-500">
-                                <div className="flex items-center gap-1"><div className="w-3 h-3 bg-green-500 rounded-full"></div> ≥90%</div>
-                                <div className="flex items-center gap-1"><div className="w-3 h-3 bg-yellow-500 rounded-full"></div> 70-89%</div>
-                                <div className="flex items-center gap-1"><div className="w-3 h-3 bg-red-500 rounded-full"></div> &lt;70%</div>
-                            </div>
-                        </>
-                    ) : (
-                        <div className="h-48 flex items-center justify-center text-gray-400">
-                            <p>No attendance data available for this period</p>
-                        </div>
-                    )}
-                </div>
-            </div>
-
-            {/* Row 2: Payroll Cost Trends (full width) */}
-            <div className="bg-white rounded-xl border border-gray-200 p-6">
-                <div className="flex items-center justify-between mb-4">
-                    <div>
-                        <h3 className="font-bold text-lg flex items-center gap-2">
-                            <DollarSign size={20} className="text-indigo-500" />
-                            Payroll Cost Trends
-                        </h3>
-                        <p className="text-sm text-gray-500">Monthly payroll expenses</p>
-                    </div>
-                    {payrollCostTrends.length > 0 && (
-                        <div className="text-right">
-                            <span className="text-2xl font-bold text-indigo-600">
-                                {formatCurrency(payrollCostTrends.reduce((s, d) => s + d.total_net, 0))}
-                            </span>
-                            <p className="text-xs text-gray-500">Total across all months</p>
-                        </div>
-                    )}
-                </div>
-                {payrollCostTrends.length > 0 ? (
-                    <>
-                        <div className="h-48 flex items-end gap-3 px-2">
-                            {payrollCostTrends.map((item, i) => (
-                                <div key={i} className="flex-1 flex flex-col items-center group">
-                                    <div className="relative w-full flex flex-col justify-end h-40">
-                                        {/* Stacked: net (indigo) + deductions (red/orange) */}
-                                        <div
-                                            className="w-full bg-indigo-500 rounded-t-md hover:bg-indigo-600 transition-all duration-300 cursor-pointer relative"
-                                            style={{ height: `${(item.total_net / maxPayroll) * 100}%`, minHeight: item.total_net > 0 ? '8px' : '0' }}
-                                            title={`Net: ${formatCurrency(item.total_net)} | Basic: ${formatCurrency(item.total_basic)} | Deductions: ${formatCurrency(item.total_deductions)} — ${formatMonth(item.month)}`}
-                                        >
-                                            <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-xs font-semibold text-gray-700 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                                                {formatCurrency(item.total_net)}
-                                            </span>
-                                        </div>
-                                    </div>
-                                    <span className="mt-2 text-xs text-gray-500 font-medium">{formatMonth(item.month)}</span>
-                                    <span className="text-[10px] text-gray-400">{item.employee_count} emp</span>
-                                </div>
-                            ))}
-                        </div>
-                        {/* Stats row */}
-                        <div className="grid grid-cols-3 gap-4 mt-4">
-                            <div className="bg-indigo-50 rounded-lg p-3 text-center">
-                                <p className="text-xs text-gray-500">Avg. Monthly</p>
-                                <p className="font-bold text-indigo-600">
-                                    {formatCurrency(payrollCostTrends.reduce((s, d) => s + d.total_net, 0) / payrollCostTrends.length)}
-                                </p>
-                            </div>
-                            <div className="bg-green-50 rounded-lg p-3 text-center">
-                                <p className="text-xs text-gray-500">Total Paid</p>
-                                <p className="font-bold text-green-600">
-                                    {payrollCostTrends.reduce((s, d) => s + d.paid_count, 0)}
-                                </p>
-                            </div>
-                            <div className="bg-yellow-50 rounded-lg p-3 text-center">
-                                <p className="text-xs text-gray-500">Total Pending</p>
-                                <p className="font-bold text-yellow-600">
-                                    {payrollCostTrends.reduce((s, d) => s + d.pending_count, 0)}
-                                </p>
-                            </div>
-                        </div>
-                    </>
-                ) : (
-                    <div className="h-48 flex items-center justify-center text-gray-400">
-                        <p>No payroll data available for this period</p>
-                    </div>
-                )}
-            </div>
-
-            {/* Row 3: Department Comparison + Employee Status Breakdown + Salary Distribution */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Department Comparison */}
-                <div className="bg-white rounded-xl border border-gray-200 p-6">
-                    <h3 className="font-bold text-lg flex items-center gap-2 mb-4">
-                        <Briefcase size={20} className="text-orange-500" />
-                        Department Comparison
-                    </h3>
-                    {departmentComparison.length > 0 ? (
-                        <div className="space-y-4">
-                            {departmentComparison.map((dept, i) => (
-                                <div key={i}>
-                                    <div className="flex justify-between items-center mb-1">
-                                        <span className="text-sm font-medium text-gray-700 truncate">{dept.name}</span>
-                                        <span className="text-sm font-bold text-gray-900">{dept.headcount}</span>
-                                    </div>
-                                    <div className="w-full bg-gray-100 rounded-full h-2.5">
-                                        <div
-                                            className="h-2.5 rounded-full bg-orange-500 transition-all duration-500"
-                                            style={{ width: `${(dept.headcount / maxDeptHeadcount) * 100}%` }}
-                                        ></div>
-                                    </div>
-                                    <div className="flex justify-between mt-1">
-                                        <span className="text-[11px] text-gray-400">Avg: {formatCurrency(dept.avg_salary)}</span>
-                                        <span className="text-[11px] text-gray-400">Cost: {formatCurrency(dept.total_salary_cost)}</span>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    ) : (
-                        <div className="h-48 flex items-center justify-center text-gray-400">
-                            <p>No departments found</p>
-                        </div>
-                    )}
-                </div>
-
-                {/* Employee Status Breakdown - Donut style */}
-                <div className="bg-white rounded-xl border border-gray-200 p-6">
-                    <h3 className="font-bold text-lg flex items-center gap-2 mb-4">
-                        <PieChart size={20} className="text-purple-500" />
-                        Employee Status
-                    </h3>
-                    {employeeStatusBreakdown.length > 0 ? (
-                        <div className="flex flex-col items-center">
-                            {/* Visual ring */}
-                            <div className="relative w-40 h-40 mb-4">
-                                <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
-                                    {(() => {
-                                        let offset = 0;
-                                        const colors = ['#22c55e', '#eab308', '#ef4444', '#6b7280', '#3b82f6'];
-                                        return employeeStatusBreakdown.map((item, i) => {
-                                            const pct = totalEmployees > 0 ? (item.count / totalEmployees) * 100 : 0;
-                                            const el = (
-                                                <circle
-                                                    key={i}
-                                                    cx="18" cy="18" r="15.9155"
-                                                    fill="none"
-                                                    stroke={colors[i % colors.length]}
-                                                    strokeWidth="3"
-                                                    strokeDasharray={`${pct} ${100 - pct}`}
-                                                    strokeDashoffset={`${-offset}`}
-                                                    className="transition-all duration-700"
-                                                />
-                                            );
-                                            offset += pct;
-                                            return el;
-                                        });
-                                    })()}
-                                </svg>
-                                <div className="absolute inset-0 flex flex-col items-center justify-center">
-                                    <span className="text-2xl font-bold text-gray-900">{totalEmployees}</span>
-                                    <span className="text-xs text-gray-500">Total</span>
-                                </div>
-                            </div>
-                            {/* Legend */}
-                            <div className="w-full space-y-2">
-                                {employeeStatusBreakdown.map((item, i) => {
-                                    const colors = statusColors[item.status] || statusColors['Inactive'];
-                                    const pct = totalEmployees > 0 ? ((item.count / totalEmployees) * 100).toFixed(1) : 0;
-                                    return (
-                                        <div key={i} className="flex items-center justify-between">
-                                            <div className="flex items-center gap-2">
-                                                <div className={`w-3 h-3 rounded-full ${colors.bg}`}></div>
-                                                <span className="text-sm text-gray-600">{item.status}</span>
-                                            </div>
-                                            <div className="flex items-center gap-2">
-                                                <span className="text-sm font-bold">{item.count}</span>
-                                                <span className="text-xs text-gray-400">({pct}%)</span>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </div>
-                    ) : (
-                        <div className="h-48 flex items-center justify-center text-gray-400">
-                            <p>No employee data</p>
-                        </div>
-                    )}
-                </div>
-
-                {/* Salary Distribution */}
-                <div className="bg-white rounded-xl border border-gray-200 p-6">
-                    <h3 className="font-bold text-lg flex items-center gap-2 mb-4">
-                        <TrendingUp size={20} className="text-emerald-500" />
-                        Salary Distribution
-                    </h3>
-                    {salaryDistribution.length > 0 ? (
-                        <div className="space-y-3">
-                            {salaryDistribution.map((range, i) => (
-                                <div key={i}>
-                                    <div className="flex justify-between items-center mb-1">
-                                        <span className="text-sm font-medium text-gray-700">{range.salary_range}</span>
-                                        <span className="text-sm font-bold text-gray-900">{range.count} emp</span>
-                                    </div>
-                                    <div className="w-full bg-gray-100 rounded-full h-2.5">
-                                        <div
-                                            className="h-2.5 rounded-full bg-emerald-500 transition-all duration-500"
-                                            style={{ width: `${(range.count / maxSalaryCount) * 100}%` }}
-                                        ></div>
-                                    </div>
-                                    <span className="text-[11px] text-gray-400">Avg: {formatCurrency(range.avg_in_range)}</span>
-                                </div>
-                            ))}
-                        </div>
-                    ) : (
-                        <div className="h-48 flex items-center justify-center text-gray-400">
-                            <p>No salary data available</p>
-                        </div>
-                    )}
-                </div>
-            </div>
+  return (
+    <div className="page">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="page-title">Analytics</h1>
+          <p className="page-subtitle mt-1">
+            Historical trends across headcount, attendance and payroll.
+          </p>
         </div>
-    );
+        <div className="flex flex-wrap items-center gap-2">
+          {/* The same segmented control the payroll cutoff uses. It was a row of
+              pill buttons with no grouping semantics and no pressed state. */}
+          <div className="segment" role="group" aria-label="Date range">
+            {RANGES.map((range) => (
+              <button
+                key={range.value}
+                type="button"
+                onClick={() => setDateRange(range.value)}
+                aria-pressed={dateRange === range.value}
+                className={`segment-item ${dateRange === range.value ? 'segment-item-active' : ''}`}
+              >
+                {range.label}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={loadAnalytics}
+            disabled={loading}
+            className="btn btn-outline btn-sm"
+          >
+            <RefreshCw size={15} className={loading ? 'animate-spin' : ''} aria-hidden="true" />
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      {/* The caveat behind this line: `employees.created_at` is SQLite's UTC
+          `CURRENT_TIMESTAMP`, while the range is built from Manila dates, so a
+          hire recorded in the last eight hours of a Manila day can land on the
+          next day of the growth chart. Attendance and payroll both store Manila
+          dates and line up exactly. */}
+      {dateRange !== 'all' && (
+        <p className="help-text">
+          <CalendarDays size={13} aria-hidden="true" />
+          {dateFilters().startDate} to {dateFilters().endDate}
+        </p>
+      )}
+
+      {/* Loading and errors used to replace the page, filter bar and all, so
+          changing the range took the control you had just used off the screen. */}
+      {loading ? (
+        <div className="card flex items-center justify-center py-16" role="status" aria-live="polite">
+          <span className="spinner spinner-lg text-accent" aria-hidden="true" />
+          <span className="sr-only">Loading analytics…</span>
+        </div>
+      ) : error ? (
+        <div className="card empty-state" role="alert">
+          <span className="empty-state-icon text-destructive">
+            <AlertCircle size={26} aria-hidden="true" />
+          </span>
+          <h2 className="section-title">{error}</h2>
+          <p className="page-subtitle max-w-md">
+            The database may be busy or the range may be unreadable. Try again.
+          </p>
+          <button type="button" onClick={loadAnalytics} className="btn btn-primary btn-sm mt-1">
+            <RefreshCw size={15} aria-hidden="true" />
+            Retry
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+            <section className="card p-5" aria-labelledby="growth-heading">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h2 id="growth-heading" className="section-title flex items-center gap-2">
+                    <Users size={17} className="text-info" aria-hidden="true" />
+                    Employee growth
+                  </h2>
+                  <p className="page-subtitle mt-0.5">New hires per month</p>
+                </div>
+                <div className="text-right">
+                  <p className="kpi-value">{totalHires}</p>
+                  <p className="text-xs text-muted-foreground">in range</p>
+                </div>
+              </div>
+              <div className="mt-4">
+                {growthRows.length > 0 ? (
+                  <ColumnChart rows={growthRows} label="New hires per month" />
+                ) : (
+                  <NoData message="No hires recorded in this range." />
+                )}
+              </div>
+            </section>
+
+            <section className="card p-5" aria-labelledby="attendance-heading">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h2 id="attendance-heading" className="section-title flex items-center gap-2">
+                    <CalendarDays size={17} className="text-accent" aria-hidden="true" />
+                    Attendance rate
+                  </h2>
+                  <p className="page-subtitle mt-0.5">Share of records marked Present</p>
+                </div>
+                {attendanceRows.length > 0 && (
+                  <div className="text-right">
+                    <p className="kpi-value">{latestRate}%</p>
+                    <p className="text-xs text-muted-foreground">latest month</p>
+                  </div>
+                )}
+              </div>
+              <div className="mt-4">
+                {attendanceRows.length > 0 ? (
+                  <>
+                    <ColumnChart rows={attendanceRows} label="Attendance rate per month" />
+                    {/* The bands are colour *and* a number on every bar, so the
+                        reading never rests on hue alone. */}
+                    <div className="mt-3 flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
+                      <span className="flex items-center gap-1.5">
+                        <span className="h-2.5 w-2.5 rounded-full bg-accent" aria-hidden="true" />
+                        90% and above
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <span className="h-2.5 w-2.5 rounded-full bg-warning" aria-hidden="true" />
+                        70–89%
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <span
+                          className="h-2.5 w-2.5 rounded-full bg-destructive"
+                          aria-hidden="true"
+                        />
+                        Below 70%
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  <NoData message="No attendance recorded in this range." />
+                )}
+              </div>
+            </section>
+          </div>
+
+          <section className="card p-5" aria-labelledby="payroll-cost-heading">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h2 id="payroll-cost-heading" className="section-title flex items-center gap-2">
+                  <PhilippinePeso size={17} className="text-accent" aria-hidden="true" />
+                  Payroll cost
+                </h2>
+                <p className="page-subtitle mt-0.5">Net paid out per month</p>
+              </div>
+              {payrollRows.length > 0 && (
+                <div className="text-right">
+                  <p className="kpi-value">{formatCurrency(totalPayroll)}</p>
+                  <p className="text-xs text-muted-foreground">total across the range</p>
+                </div>
+              )}
+            </div>
+            <div className="mt-4">
+              {payrollRows.length > 0 ? (
+                <>
+                  <ColumnChart rows={payrollRows} label="Net payroll per month" />
+                  <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <div className="surface p-3">
+                      <p className="kpi-label">Average month</p>
+                      <p className="mt-1 text-base font-semibold tnum">
+                        {formatCurrency(totalPayroll / payrollRows.length)}
+                      </p>
+                    </div>
+                    <div className="surface p-3">
+                      <p className="kpi-label">Records paid</p>
+                      <p className="mt-1 text-base font-semibold tnum text-accent">{paidCount}</p>
+                    </div>
+                    <div className="surface p-3">
+                      <p className="kpi-label">Records pending</p>
+                      <p className="mt-1 text-base font-semibold tnum text-warning">
+                        {pendingCount}
+                      </p>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <NoData message="No payroll filed in this range." />
+              )}
+            </div>
+          </section>
+
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-3">
+            <section className="card p-5" aria-labelledby="departments-heading">
+              <h2 id="departments-heading" className="section-title flex items-center gap-2">
+                <Briefcase size={17} className="text-warning" aria-hidden="true" />
+                Departments
+              </h2>
+              <p className="page-subtitle mt-0.5">Active headcount and salary cost</p>
+              <div className="mt-4 flex flex-col gap-3.5">
+                {departmentComparison.length > 0 ? (
+                  departmentComparison.map((department) => (
+                    <BarRow
+                      key={department.id ?? department.name}
+                      title={department.name || 'Unnamed'}
+                      value={num(department.headcount)}
+                      percent={(num(department.headcount) / maxHeadcount) * 100}
+                      tone="bg-warning"
+                      footLeft={`Avg ${formatCurrency(department.avg_salary)}`}
+                      footRight={formatCurrency(department.total_salary_cost)}
+                      description={`${department.name || 'Unnamed'} share of the largest department's headcount`}
+                    />
+                  ))
+                ) : (
+                  <NoData message="No departments found." />
+                )}
+              </div>
+            </section>
+
+            <section className="card p-5" aria-labelledby="status-heading">
+              <h2 id="status-heading" className="section-title flex items-center gap-2">
+                <PieChart size={17} className="text-info" aria-hidden="true" />
+                Employee status
+              </h2>
+              <p className="page-subtitle mt-0.5">Every employee on file</p>
+              {employeeStatusBreakdown.length > 0 ? (
+                <div className="mt-4 flex flex-col items-center gap-4">
+                  <div className="relative h-40 w-40">
+                    {/* r = 15.9155 makes the circumference exactly 100, so a
+                        percentage can be written straight into the dash array.
+                        The arcs are one accumulating offset, as before. */}
+                    <svg viewBox="0 0 36 36" className="h-full w-full -rotate-90" aria-hidden="true">
+                      {(() => {
+                        let offset = 0;
+                        return employeeStatusBreakdown.map((row) => {
+                          const percent =
+                            totalEmployees > 0 ? (num(row.count) / totalEmployees) * 100 : 0;
+                          const arc = (
+                            <circle
+                              key={row.status}
+                              cx="18"
+                              cy="18"
+                              r="15.9155"
+                              fill="none"
+                              stroke={toneFor(row.status).stroke}
+                              strokeWidth="3.4"
+                              strokeDasharray={`${percent} ${100 - percent}`}
+                              strokeDashoffset={`${-offset}`}
+                            />
+                          );
+                          offset += percent;
+                          return arc;
+                        });
+                      })()}
+                    </svg>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center">
+                      <span className="kpi-value">{totalEmployees}</span>
+                      <span className="text-xs text-muted-foreground">total</span>
+                    </div>
+                  </div>
+                  {/* The ring itself is aria-hidden: this list is its text
+                      alternative, and it carries the counts the colours stand
+                      for so the chart never depends on hue alone. */}
+                  <ul className="flex w-full flex-col gap-2">
+                    {employeeStatusBreakdown.map((row) => {
+                      const percent =
+                        totalEmployees > 0
+                          ? Math.round((num(row.count) / totalEmployees) * 100)
+                          : 0;
+                      return (
+                        <li
+                          key={row.status}
+                          className="flex items-center justify-between gap-2 text-sm"
+                        >
+                          <span className="flex min-w-0 items-center gap-2">
+                            <span
+                              className={`h-2.5 w-2.5 shrink-0 rounded-full ${toneFor(row.status).dot}`}
+                              aria-hidden="true"
+                            />
+                            <span className="truncate">{row.status || 'Unspecified'}</span>
+                          </span>
+                          <span className="tnum shrink-0 text-muted-foreground">
+                            {num(row.count)} · {percent}%
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ) : (
+                <NoData message="No employees on file yet." />
+              )}
+            </section>
+
+            <section className="card p-5" aria-labelledby="salary-heading">
+              <h2 id="salary-heading" className="section-title flex items-center gap-2">
+                <TrendingUp size={17} className="text-accent" aria-hidden="true" />
+                Salary distribution
+              </h2>
+              {/* The query counts `status = 'Active'` only, so the bands do not
+                  add up to the ring's total above. */}
+              <p className="page-subtitle mt-0.5">Monthly basic of active staff</p>
+              <div className="mt-4 flex flex-col gap-3.5">
+                {salaryDistribution.length > 0 ? (
+                  salaryDistribution.map((band) => (
+                    <BarRow
+                      key={band.salary_range}
+                      title={band.salary_range}
+                      value={num(band.count)}
+                      percent={(num(band.count) / maxSalaryCount) * 100}
+                      tone="bg-accent"
+                      footLeft={`Avg ${formatCurrency(band.avg_in_range)}`}
+                      description={`${band.salary_range}: ${num(band.count)} active employees`}
+                    />
+                  ))
+                ) : (
+                  <NoData message="No salary data yet." />
+                )}
+              </div>
+            </section>
+          </div>
+        </>
+      )}
+    </div>
+  );
 };
 
 export default Analytics;
+

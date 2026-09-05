@@ -1,40 +1,66 @@
+/**
+ * Password reset, in two steps: prove the super admin password, then set a new
+ * one. Both commands are unchanged — `verifySuperAdminPassword` gates step two,
+ * `resetAdminPassword` does the write — and the reset still ends on `/login`.
+ *
+ * The `onResetPassword` prop was passed by `App.jsx` and ignored; the page
+ * called `window.api.resetAdminPassword` itself, so the wrapper's error
+ * handling never ran. It is used now, with the direct call as the fallback.
+ */
 import React, { useState } from 'react';
-import { 
-  Mail, Lock, Key, Shield, AlertCircle, 
-  CheckCircle2, ArrowLeft, Eye, EyeOff,
-  LogIn
-} from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
+import {
+  AlertCircle,
+  ArrowLeft,
+  CheckCircle,
+  Eye,
+  EyeOff,
+  KeyRound,
+  Loader2,
+  LogIn,
+  Lock,
+  Mail,
+  ShieldAlert
+} from 'lucide-react';
+import { useDialog } from '../hooks/useDialog';
 
-// Success Modal Component
-const SuccessModal = ({ onClose }) => {
+const MIN_PASSWORD_LENGTH = 8;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Shown once the write lands. Its one action is the one the flow ends on. */
+const SuccessDialog = ({ onClose }) => {
+  const dialogRef = useDialog(true, onClose);
+
   return (
-    <div className="fixed inset-0 bg-linear-to-br from-gray-100 to-gray-300 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-xl max-w-sm w-full p-6 animate-fade-in">
-        <div className="text-center mb-4">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-green-100 rounded-full mb-4">
-            <CheckCircle2 className="h-8 w-8 text-green-600" />
-          </div>
-          <h3 className="text-lg font-bold text-gray-900 mb-2">Password Reset Successful!</h3>
-          <p className="text-sm text-gray-600 mb-6">
-            Your admin password has been reset successfully. You can now login with your new password.
+    <div className="modal-backdrop">
+      <div
+        ref={dialogRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="reset-done-title"
+        className="modal-panel max-w-sm"
+      >
+        <div className="px-5 py-6 text-center">
+          <span className="kpi-icon mx-auto h-14 w-14 bg-[rgb(34_197_94/0.14)] text-accent">
+            <CheckCircle size={28} aria-hidden="true" />
+          </span>
+          <h2 id="reset-done-title" className="section-title mt-3 text-lg">
+            Password reset
+          </h2>
+          <p className="page-subtitle mt-1">
+            Sign in with the new password. The super admin password has not
+            changed, and it is still what a future reset asks for.
           </p>
-        </div>
-        
-        <div className="space-y-3">
           <button
+            type="button"
             onClick={onClose}
-            className="w-full flex items-center justify-center py-3 px-4 bg-linear-to-r from-green-500 to-blue-600 text-white font-medium rounded-lg hover:bg-green-700 transition-colors duration-200"
+            data-autofocus
+            className="btn btn-primary mt-5 w-full"
           >
-            <LogIn className="h-4 w-4 mr-2" />
-            Go to Login Page
+            <LogIn size={16} aria-hidden="true" />
+            Go to sign in
           </button>
-          
-          <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-            <p className="text-xs text-blue-800">
-              <span className="font-medium">Remember:</span> Keep your Super Admin Password secure for future resets.
-            </p>
-          </div>
         </div>
       </div>
     </div>
@@ -43,140 +69,108 @@ const SuccessModal = ({ onClose }) => {
 
 const ForgotPasswordPage = ({ onResetPassword }) => {
   const navigate = useNavigate();
+
   const [formData, setFormData] = useState({
     email: '',
     super_admin_password: '',
     new_password: '',
     confirm_password: ''
   });
-  const [showSuperPassword, setShowSuperPassword] = useState(false);
-  const [showNewPassword, setShowNewPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [reveal, setReveal] = useState({ superAdmin: false, next: false, confirm: false });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [formErrors, setFormErrors] = useState({});
   const [step, setStep] = useState(1);
-  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
 
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: value
-    }));
-    
-    // Clear error for this field
-    if (formErrors[name]) {
-      setFormErrors(prev => ({
-        ...prev,
-        [name]: ''
-      }));
+  const onField = (field) => (event) => {
+    const { value } = event.target;
+    setFormData((previous) => ({ ...previous, [field]: value }));
+    if (formErrors[field]) {
+      setFormErrors((previous) => ({ ...previous, [field]: '' }));
     }
     if (error) setError('');
   };
 
-  const validateStep1 = () => {
+  const toggleReveal = (field) => () =>
+    setReveal((previous) => ({ ...previous, [field]: !previous[field] }));
+  const handleVerify = async (event) => {
+    event.preventDefault();
+
     const errors = {};
-    
-    if (!formData.email.trim()) {
-      errors.email = 'Email is required';
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
-      errors.email = 'Invalid email format';
-    }
-    
+    if (!formData.email.trim()) errors.email = 'Enter the registered email address.';
+    else if (!EMAIL_PATTERN.test(formData.email)) errors.email = 'That is not a valid email address.';
     if (!formData.super_admin_password) {
-      errors.super_admin_password = 'Super Admin Password is required';
+      errors.super_admin_password = 'Enter the super admin password.';
     }
-    
     setFormErrors(errors);
-    return Object.keys(errors).length === 0;
-  };
-
-  const validateStep2 = () => {
-    const errors = {};
-    
-    if (!formData.new_password) {
-      errors.new_password = 'New password is required';
-    } else if (formData.new_password.length < 8) {
-      errors.new_password = 'Password must be at least 8 characters';
-    }
-    
-    if (!formData.confirm_password) {
-      errors.confirm_password = 'Please confirm your password';
-    } else if (formData.new_password !== formData.confirm_password) {
-      errors.confirm_password = 'Passwords do not match';
-    }
-    
-    setFormErrors(errors);
-    return Object.keys(errors).length === 0;
-  };
-
-  const handleVerify = async (e) => {
-    e.preventDefault();
-    
-    if (!validateStep1()) {
-      return;
-    }
+    if (Object.keys(errors).length > 0) return;
 
     setIsLoading(true);
     setError('');
-    setSuccess('');
 
     try {
-      const result = await window.electronAPI.verifySuperAdminPassword(
+      const result = await window.api.verifySuperAdminPassword(
         formData.email,
         formData.super_admin_password
       );
-      
+
       if (result.success) {
-        setSuccess('Verification successful! You can now reset your password.');
         setStep(2);
       } else {
-        setError(result.error || 'Verification failed. Please check your email and Super Admin Password.');
+        setError(result.error || 'That email and super admin password did not match.');
       }
-    } catch (err) {
-      setError('An unexpected error occurred');
-      console.error('Verification error:', err);
+    } catch (verifyError) {
+      console.error('Verification error:', verifyError);
+      setError('Something went wrong checking that password.');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleReset = async (e) => {
-    e.preventDefault();
-    
-    if (!validateStep2()) {
-      return;
-    }
+  const handleReset = async (event) => {
+    event.preventDefault();
 
+    const errors = {};
+    if (!formData.new_password) errors.new_password = 'Enter a new password.';
+    else if (formData.new_password.length < MIN_PASSWORD_LENGTH) {
+      errors.new_password = `Use at least ${MIN_PASSWORD_LENGTH} characters.`;
+    }
+    if (!formData.confirm_password) errors.confirm_password = 'Type the new password again.';
+    else if (formData.new_password !== formData.confirm_password) {
+      errors.confirm_password = 'The two passwords do not match.';
+    }
+    setFormErrors(errors);
+    if (Object.keys(errors).length > 0) return;
     setIsLoading(true);
     setError('');
 
     try {
-      const result = await window.electronAPI.resetAdminPassword(
+      const reset =
+        onResetPassword ??
+        ((email, superAdminPassword, newPassword) =>
+          window.api.resetAdminPassword(email, superAdminPassword, newPassword));
+      const result = await reset(
         formData.email,
         formData.super_admin_password,
         formData.new_password
       );
-      
+
       if (result.success) {
-        // Show success modal instead of inline message
-        setShowSuccessModal(true);
+        setShowSuccess(true);
       } else {
-        setError(result.error || 'Password reset failed');
+        setError(result.error || 'The password could not be reset.');
       }
-    } catch (err) {
-      setError('An unexpected error occurred');
-      console.error('Reset error:', err);
+    } catch (resetError) {
+      console.error('Reset error:', resetError);
+      setError('Something went wrong resetting the password.');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleCloseSuccessModal = () => {
-    setShowSuccessModal(false);
-    // Clear form and reset to step 1
+  const finish = () => {
+    setShowSuccess(false);
     setFormData({
       email: '',
       super_admin_password: '',
@@ -184,323 +178,287 @@ const ForgotPasswordPage = ({ onResetPassword }) => {
       confirm_password: ''
     });
     setStep(1);
-    // Navigate to login page
     navigate('/login');
   };
 
   return (
     <>
-      {/* Success Modal */}
-      {showSuccessModal && <SuccessModal onClose={handleCloseSuccessModal} />}
+      {showSuccess && <SuccessDialog onClose={finish} />}
 
-      <div className="min-h-screen flex justify-center bg-gradient-to-br from-gray-100 to-gray-300 py-8 px-4 overflow-y-auto">
-        <div className="w-full max-w-xl">
-          {/* Header */}
-          <div className="text-center mt-5 mb-3">
-            <h1 className="text-2xl font-bold text-black mb-1">Reset Admin Password</h1>
-            <p className="text-md text-gray-900 italic">
-              Requires Super Admin Password for verification
-            </p>
-          </div>
+      {/* `body` is `overflow: hidden`, so a screen outside the sidebar layout
+          owns its own scrolling. `justify-center-safe` centres the short step-1
+          form but degrades to top-aligned for the taller step 2, where plain
+          `justify-center` would put the heading out of reach. */}
+      <div className="relative flex h-full flex-col items-center justify-center-safe overflow-y-auto p-6">
+        <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
+          <div className="absolute right-[-10%] top-[-10%] h-[500px] w-[500px] rounded-full bg-[rgb(239_68_68/0.12)] blur-[100px]" />
+          <div className="absolute bottom-[-10%] left-[-10%] h-[500px] w-[500px] rounded-full bg-[rgb(96_165_250/0.12)] blur-[100px]" />
+        </div>
 
-          {/* Back to Login */}
-          <div className="mb-2">
-            <Link 
-              to="/login" 
-              className="inline-flex items-center text-sm text-gray-800 hover:text-gray-500 transition-colors"
-            >
-              <ArrowLeft className="h-4 w-4 mr-1" />
-              Back to Login
-            </Link>
-          </div>
+        <div className="relative z-10 w-full max-w-lg">
+          <Link to="/login" className="link mb-4 inline-flex items-center gap-1.5 text-sm">
+            <ArrowLeft size={15} aria-hidden="true" />
+            Back to sign in
+          </Link>
 
-          {/* Reset Card */}
-          <div className="bg-white backdrop-blur-lg rounded-xl border border-gray-700 p-5 shadow-xl">
+          <div className="card p-6">
+            <div className="flex items-start gap-3">
+              <span className="kpi-icon bg-[rgb(239_68_68/0.14)] text-destructive">
+                <ShieldAlert size={20} aria-hidden="true" />
+              </span>
+              <div className="min-w-0">
+                <h1 className="section-title text-lg">Reset the admin password</h1>
+                <p className="page-subtitle mt-0.5">
+                  Needs the super admin password issued at registration.
+                </p>
+              </div>
+            </div>
+
+            {/* Two steps, so the position is stated rather than implied by which
+                fields happen to be on screen. */}
+            <div className="mt-5">
+              <div className="flex items-baseline justify-between">
+                <p className="eyebrow">Step {step} of 2</p>
+                <p className="text-sm text-muted-foreground">
+                  {step === 1 ? 'Verify' : 'New password'}
+                </p>
+              </div>
+              <div
+                className="progress mt-2"
+                role="progressbar"
+                aria-valuenow={step}
+                aria-valuemin={1}
+                aria-valuemax={2}
+                aria-label="Reset progress"
+              >
+                <div className="progress-bar" style={{ width: step === 1 ? '50%' : '100%' }} />
+              </div>
+            </div>
             {step === 1 ? (
-              /* Step 1: Verification */
-              <form onSubmit={handleVerify} className="space-y-4">
-                {/* Critical Warning */}
-                <div className="p-3 bg-red-200 border border-red-800 rounded-lg">
-                  <div className="flex items-start space-x-2">
-                    <Shield className="h-4 w-4 text-red-800 shrink-0 mt-0.5" />
-                    <div>
-                      <h3 className="text-md font-medium text-black mb-1">Super Admin Password Required</h3>
-                      <p className="text-sm text-gray-900 italic">
-                        You must provide the Super Admin Password that was generated during registration. 
-                        This password is tied to your registered email.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Email */}
-                <div className="space-y-1.5">
-                  <label htmlFor="email" className="block text-md font-medium text-gray-900">
-                    Registered Email Address *
+              <form onSubmit={handleVerify} className="mt-5 flex flex-col gap-4">
+                <div>
+                  <label htmlFor="email" className="label label-required">
+                    Registered email address
                   </label>
-                  <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-900" />
+                  <div className="input-group">
+                    <Mail size={15} className="input-icon" aria-hidden="true" />
                     <input
                       id="email"
-                      name="email"
                       type="email"
                       value={formData.email}
-                      onChange={handleInputChange}
-                      className={`pl-9 w-full py-4 bg-gray-50 border ${
-                        formErrors.email ? 'border-red-500' : 'border-gray-700'
-                      } rounded-lg text-black placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent text-sm transition-all duration-200`}
+                      onChange={onField('email')}
+                      className={`input ${formErrors.email ? 'input-invalid' : ''}`}
                       placeholder="admin@yourcompany.com"
+                      autoComplete="email"
+                      aria-invalid={formErrors.email ? 'true' : undefined}
+                      aria-describedby={formErrors.email ? 'email-error' : undefined}
                     />
                   </div>
                   {formErrors.email && (
-                    <p className="text-xs text-red-400 flex items-center mt-1">
-                      <AlertCircle className="h-4 w-4 mr-1" />
+                    <p id="email-error" className="error-text" role="alert">
+                      <AlertCircle size={13} aria-hidden="true" />
                       {formErrors.email}
                     </p>
                   )}
                 </div>
 
-                {/* Super Admin Password */}
-                <div className="space-y-1.5">
-                  <label htmlFor="super_admin_password" className="block text-md font-medium text-gray-900">
-                    Super Admin Password *
+                <div>
+                  <label htmlFor="super-admin-password" className="label label-required">
+                    Super admin password
                   </label>
-                  <div className="relative">
-                    <Key className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-900" />
+                  <div className="input-group">
+                    <KeyRound size={15} className="input-icon" aria-hidden="true" />
                     <input
-                      id="super_admin_password"
-                      name="super_admin_password"
-                      type={showSuperPassword ? "text" : "password"}
+                      id="super-admin-password"
+                      type={reveal.superAdmin ? 'text' : 'password'}
                       value={formData.super_admin_password}
-                      onChange={handleInputChange}
-                      className={`pl-9 pr-9 w-full py-4 bg-gray-50 border ${
-                        formErrors.super_admin_password ? 'border-red-500' : 'border-gray-700'
-                      } rounded-lg text-black placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent text-sm transition-all duration-200`}
-                      placeholder="Enter Super Admin Password"
+                      onChange={onField('super_admin_password')}
+                      className={`input pr-11 ${
+                        formErrors.super_admin_password ? 'input-invalid' : ''
+                      }`}
+                      placeholder="Issued at registration"
+                      autoComplete="off"
+                      aria-invalid={formErrors.super_admin_password ? 'true' : undefined}
+                      aria-describedby={
+                        formErrors.super_admin_password ? 'super-error' : 'super-help'
+                      }
                     />
                     <button
                       type="button"
-                      onClick={() => setShowSuperPassword(!showSuperPassword)}
-                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-800 hover:text-gray-700"
+                      onClick={toggleReveal('superAdmin')}
+                      className="input-affix btn btn-ghost btn-sm btn-icon"
+                      aria-pressed={reveal.superAdmin}
+                      aria-label={
+                        reveal.superAdmin
+                          ? 'Hide the super admin password'
+                          : 'Show the super admin password'
+                      }
                     >
-                      {showSuperPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      {reveal.superAdmin ? (
+                        <EyeOff size={15} aria-hidden="true" />
+                      ) : (
+                        <Eye size={15} aria-hidden="true" />
+                      )}
                     </button>
                   </div>
-                  {formErrors.super_admin_password && (
-                    <p className="text-xs text-red-400 flex items-center mt-1">
-                      <AlertCircle className="h-4 w-4 mr-1" />
+                  {formErrors.super_admin_password ? (
+                    <p id="super-error" className="error-text" role="alert">
+                      <AlertCircle size={13} aria-hidden="true" />
                       {formErrors.super_admin_password}
                     </p>
-                  )}
-                  <p className="text-sm text-gray-600 italic mt-1">
-                    This is the password generated during registration.
-                  </p>
-                </div>
-
-                {/* Reminder Notice */}
-                <div className="p-2 bg-amber-50 border border-amber-300 rounded-lg">
-                  <div className="flex items-start space-x-2">
-                    <AlertCircle className="h-4 w-4 text-amber-700 shrink-0 mt-0.5" />
-                    <div>
-                      <h3 className="text-sm font-medium text-black mb-0.5">Remember?</h3>
-                      <p className="text-sm text-gray-800 italic">
-                        You were instructed to save this password securely during registration.
-                        It cannot be recovered if lost.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Error & Success Messages */}
-                {error && (
-                  <div className="p-2 bg-red-100 border border-red-300 rounded-lg">
-                    <p className="text-red-700 text-xs flex items-center">
-                      <AlertCircle className="h-4 w-4 mr-1" />
-                      {error}
-                    </p>
-                  </div>
-                )}
-
-                {success && (
-                  <div className="p-2 bg-green-50 border border-green-300 rounded-lg">
-                    <p className="text-green-700 text-xs flex items-center">
-                      <CheckCircle2 className="h-4 w-4 mr-2" />
-                      {success}
-                    </p>
-                  </div>
-                )}
-
-                {/* Verify Button */}
-                <button
-                  type="submit"
-                  disabled={isLoading}
-                  className="w-full flex justify-center items-center py-4 px-4 border border-transparent rounded-lg font-medium text-white bg-gradient-to-r from-red-500 to-orange-600 hover:from-red-600 hover:to-orange-700 focus:outline-none focus:ring-1 focus:ring-red-500 focus:ring-offset-1 focus:ring-offset-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 text-sm"
-                >
-                  {isLoading ? (
-                    <>
-                      <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
-                      Verifying Super Admin Password...
-                    </>
                   ) : (
-                    'Verify & Proceed to Password Reset'
+                    <p id="super-help" className="help-text">
+                      Shown once during registration and not recoverable from here.
+                    </p>
                   )}
+                </div>
+
+                {error && (
+                  <p className="error-text" role="alert">
+                    <AlertCircle size={13} aria-hidden="true" />
+                    {error}
+                  </p>
+                )}
+
+                <button type="submit" disabled={isLoading} className="btn btn-primary btn-lg w-full">
+                  {isLoading && <Loader2 size={17} className="animate-spin" aria-hidden="true" />}
+                  {isLoading ? 'Checking…' : 'Verify and continue'}
                 </button>
               </form>
             ) : (
-              /* Step 2: Reset Password */
-              <form onSubmit={handleReset} className="space-y-4">
-                {/* Success Verification */}
-                <div className="p-2 bg-green-50 border border-green-300 rounded-lg">
-                  <div className="flex items-center">
-                    <CheckCircle2 className="h-4 w-4 text-green-800 mr-2" />
-                    <div className="flex-1">
-                      <p className="text-gray-900 text-xs font-medium">✓ Verification Successful</p>
-                      <p className="text-xs text-gray-800 mt-0.5">
-                        Email: <span className="text-gray-950">{formData.email}</span>
-                      </p>
-                    </div>
-                  </div>
+              <form onSubmit={handleReset} className="mt-5 flex flex-col gap-4">
+                <div className="alert alert-success" role="status">
+                  <CheckCircle size={16} aria-hidden="true" />
+                  <span className="wrap-anywhere">
+                    Verified for <strong>{formData.email}</strong>
+                  </span>
                 </div>
 
-                {/* New Password */}
-                <div className="space-y-1.5">
-                  <label htmlFor="new_password" className="block text-xs font-medium text-gray-900">
-                    New Password *
+                <div>
+                  <label htmlFor="new-password" className="label label-required">
+                    New password
                   </label>
-                  <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <div className="input-group">
+                    <Lock size={15} className="input-icon" aria-hidden="true" />
                     <input
-                      id="new_password"
-                      name="new_password"
-                      type={showNewPassword ? "text" : "password"}
+                      id="new-password"
+                      type={reveal.next ? 'text' : 'password'}
                       value={formData.new_password}
-                      onChange={handleInputChange}
-                      className={`pl-9 pr-9 w-full py-2.5 bg-gray-50 border ${
-                        formErrors.new_password ? 'border-red-500' : 'border-gray-700'
-                      } rounded-lg text-black placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent text-xs transition-all duration-200`}
-                      placeholder="Enter new password"
+                      onChange={onField('new_password')}
+                      className={`input pr-11 ${formErrors.new_password ? 'input-invalid' : ''}`}
+                      autoComplete="new-password"
+                      aria-invalid={formErrors.new_password ? 'true' : undefined}
+                      aria-describedby={formErrors.new_password ? 'new-error' : 'new-help'}
                     />
                     <button
                       type="button"
-                      onClick={() => setShowNewPassword(!showNewPassword)}
-                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-900"
+                      onClick={toggleReveal('next')}
+                      className="input-affix btn btn-ghost btn-sm btn-icon"
+                      aria-pressed={reveal.next}
+                      aria-label={reveal.next ? 'Hide the new password' : 'Show the new password'}
                     >
-                      {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      {reveal.next ? (
+                        <EyeOff size={15} aria-hidden="true" />
+                      ) : (
+                        <Eye size={15} aria-hidden="true" />
+                      )}
                     </button>
                   </div>
-                  {formErrors.new_password && (
-                    <p className="text-xs text-red-400 flex items-center mt-1">
-                      <AlertCircle className="h-4 w-4 mr-1" />
+                  {formErrors.new_password ? (
+                    <p id="new-error" className="error-text" role="alert">
+                      <AlertCircle size={13} aria-hidden="true" />
                       {formErrors.new_password}
                     </p>
-                  )}
-                  {formData.new_password && (
-                    <div className="text-xs text-gray-800 mt-1">
-                      Password strength: {formData.new_password.length >= 8 ? '✓ Strong' : '⚠ Weak'}
-                    </div>
+                  ) : (
+                    <p id="new-help" className="help-text">
+                      At least {MIN_PASSWORD_LENGTH} characters.
+                    </p>
                   )}
                 </div>
-
-                {/* Confirm New Password */}
-                <div className="space-y-1.5">
-                  <label htmlFor="confirm_password" className="block text-xs font-medium text-gray-900">
-                    Confirm New Password *
+                <div>
+                  <label htmlFor="confirm-password" className="label label-required">
+                    Confirm new password
                   </label>
-                  <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <div className="input-group">
+                    <Lock size={15} className="input-icon" aria-hidden="true" />
                     <input
-                      id="confirm_password"
-                      name="confirm_password"
-                      type={showConfirmPassword ? "text" : "password"}
+                      id="confirm-password"
+                      type={reveal.confirm ? 'text' : 'password'}
                       value={formData.confirm_password}
-                      onChange={handleInputChange}
-                      className={`pl-9 pr-9 w-full py-2.5 bg-gray-50 border ${
-                        formErrors.confirm_password ? 'border-red-500' : 'border-gray-700'
-                      } rounded-lg text-black placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent text-xs transition-all duration-200`}
-                      placeholder="Confirm new password"
+                      onChange={onField('confirm_password')}
+                      className={`input pr-11 ${
+                        formErrors.confirm_password ? 'input-invalid' : ''
+                      }`}
+                      autoComplete="new-password"
+                      aria-invalid={formErrors.confirm_password ? 'true' : undefined}
+                      aria-describedby={formErrors.confirm_password ? 'confirm-error' : undefined}
                     />
                     <button
                       type="button"
-                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-900"
+                      onClick={toggleReveal('confirm')}
+                      className="input-affix btn btn-ghost btn-sm btn-icon"
+                      aria-pressed={reveal.confirm}
+                      aria-label={
+                        reveal.confirm ? 'Hide the confirmation' : 'Show the confirmation'
+                      }
                     >
-                      {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      {reveal.confirm ? (
+                        <EyeOff size={15} aria-hidden="true" />
+                      ) : (
+                        <Eye size={15} aria-hidden="true" />
+                      )}
                     </button>
                   </div>
                   {formErrors.confirm_password && (
-                    <p className="text-xs text-red-400 flex items-center mt-1">
-                      <AlertCircle className="h-4 w-4 mr-1" />
+                    <p id="confirm-error" className="error-text" role="alert">
+                      <AlertCircle size={13} aria-hidden="true" />
                       {formErrors.confirm_password}
                     </p>
                   )}
                 </div>
 
-                {/* Important Notice */}
-                <div className="p-2 bg-blue-50 border border-blue-300 rounded-lg">
-                  <div className="flex items-start space-x-2">
-                    <AlertCircle className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
-                    <div>
-                      <h3 className="text-xs font-medium text-black mb-0.5">Security Note</h3>
-                      <p className="text-xs text-gray-800 italic">
-                        Your Super Admin Password will remain unchanged. It's still required for future password resets.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Error Message */}
                 {error && (
-                  <div className="p-2 bg-red-100 border border-red-300 rounded-lg">
-                    <p className="text-red-700 text-xs flex items-center">
-                      <AlertCircle className="h-4 w-4 mr-1" />
-                      {error}
-                    </p>
-                  </div>
+                  <p className="error-text" role="alert">
+                    <AlertCircle size={13} aria-hidden="true" />
+                    {error}
+                  </p>
                 )}
-
-                {/* Action Buttons */}
-                <div className="grid grid-cols-2 gap-3">
+                <div className="flex flex-wrap items-center justify-end gap-2">
                   <button
                     type="button"
-                    onClick={() => setStep(1)}
-                    className="py-2.5 px-4 border border-gray-400 rounded-lg font-medium text-gray-900 hover:text-gray-700 hover:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500 focus:border-transparent transition-all duration-200 text-xs"
-                  >
-                    ← Back
-                  </button>
-                  <button
-                    type="submit"
+                    onClick={() => {
+                      setStep(1);
+                      setError('');
+                      setFormErrors({});
+                    }}
                     disabled={isLoading}
-                    className="py-2.5 px-4 border border-transparent rounded-lg font-medium text-white bg-linear-to-r from-green-500 to-blue-600 hover:from-green-600 hover:to-blue-700 focus:outline-none focus:ring-1 focus:ring-green-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 text-xs"
+                    className="btn btn-outline"
                   >
-                    {isLoading ? (
-                      <>
-                        <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2 inline-block"></div>
-                        Resetting...
-                      </>
-                    ) : (
-                      'Reset Password'
+                    <ArrowLeft size={16} aria-hidden="true" />
+                    Back
+                  </button>
+                  <button type="submit" disabled={isLoading} className="btn btn-primary">
+                    {isLoading && (
+                      <Loader2 size={16} className="animate-spin" aria-hidden="true" />
                     )}
+                    {isLoading ? 'Resetting…' : 'Reset password'}
                   </button>
                 </div>
               </form>
             )}
 
-            {/* Footer Note */}
-            <div className="text-center pt-4 border-t border-gray-300 mt-4">
-              <p className="text-md text-gray-900">
-                If you lost your Super Admin Password, contact system administrator.
-                <br />
-                <span className="text-red-600 font-medium">⚠ Cannot be recovered through this system</span>
-              </p>
-            </div>
-          </div>
+            <hr className="divider my-5" />
 
-          {/* Footer */}
-          <div className="mt-6 text-center">
-            <p className="text-md text-gray-500">
-              Company Administration System • © {new Date().getFullYear()}
+            <p className="help-text">
+              <AlertCircle size={13} aria-hidden="true" />
+              The super admin password is not changed by a reset, and it cannot be
+              recovered here — without it there is no way back into the account.
             </p>
           </div>
+
+          <p className="mt-6 text-center text-sm text-muted-foreground">
+            Admin Pro · © {new Date().getFullYear()}
+          </p>
         </div>
       </div>
     </>

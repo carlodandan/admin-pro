@@ -1,217 +1,1241 @@
-@import "tailwindcss";
+/*
+ * Admin Pro design system.
+ *
+ * From the ui-ux-pro-max pass: pattern "Real-Time / Operations", style
+ * Glassmorphism, variance 4/10, motion 4/10, density 8/10 (8-32px spacing).
+ * Every colour is a semantic token — components reference the token or the
+ * Tailwind utility built from it, never a raw hex, so the palette has one
+ * definition.
+ *
+ * Contrast is WCAG 2.1 AA for every pairing that ships: foreground/background
+ * 17.1:1, muted-foreground/background 7.0:1, muted-foreground/card 6.1:1,
+ * accent 7.8:1, warning 10.7:1, info 7.0:1, destructive-as-text 4.7:1.
+ * `--color-destructive-solid` is darker than `--color-destructive` because
+ * white on #EF4444 is only 3.8:1 — filled danger buttons take the solid, text
+ * and icons take the other. Same reasoning for `--color-warning-solid`.
+ */
 
-/* Custom Styles */
-:root {
-  --sidebar-width: 256px;
-  --header-height: 72px;
+/* Self-hosted, latin subset. No runtime network fetch; fontsource sets swap. */
+@import '@fontsource/fira-sans/latin-400.css';
+@import '@fontsource/fira-sans/latin-500.css';
+@import '@fontsource/fira-sans/latin-600.css';
+@import '@fontsource/fira-sans/latin-700.css';
+@import '@fontsource/fira-code/latin-400.css';
+@import '@fontsource/fira-code/latin-500.css';
+@import '@fontsource/fira-code/latin-600.css';
+@import '@fontsource/fira-code/latin-700.css';
+@import 'tailwindcss';
+
+@theme {
+  /* Fira Sans carries the body, Fira Code the headings and every figure. */
+  --font-sans: 'Fira Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, 'Courier New', monospace;
+  --font-display: 'Fira Code', ui-monospace, 'Courier New', monospace;
+
+  /* Surfaces, darkest first. */
+  --color-background: #0f172a;
+  --color-card: #1b2336;
+  --color-primary: #1e293b;
+  --color-muted: #272f42;
+  --color-secondary: #334155;
+
+  /* Ink. */
+  --color-foreground: #f8fafc;
+  --color-primary-foreground: #ffffff;
+  --color-secondary-foreground: #f8fafc;
+  --color-muted-foreground: #94a3b8;
+
+  /* Semantic. */
+  --color-accent: #22c55e;
+  --color-accent-foreground: #0f172a;
+  --color-destructive: #ef4444;
+  --color-destructive-solid: #dc2626;
+  --color-destructive-foreground: #ffffff;
+  --color-warning: #fbbf24;
+  --color-warning-solid: #b45309;
+  --color-info: #60a5fa;
+
+  /* Lines. `--color-border` separates surfaces; `--color-border-strong` is for
+     anything a user has to aim at, where 3:1 non-text contrast applies. */
+  --color-border: #475569;
+  --color-border-strong: #64748b;
+  --color-ring: #ffffff;
+
+  /* One elevation ladder. Glass panels add their own inset highlight. */
+  --shadow-panel: 0 1px 2px rgb(2 6 23 / 0.4), 0 8px 24px -12px rgb(2 6 23 / 0.6);
+  --shadow-raised: 0 2px 4px rgb(2 6 23 / 0.45), 0 16px 40px -16px rgb(2 6 23 / 0.7);
+  --shadow-overlay: 0 24px 64px -24px rgb(2 6 23 / 0.85);
+
+  --radius-panel: 14px;
+  --radius-control: 10px;
+
+  /* Motion tokens. Exit is ~65% of enter, per the motion guidance. */
+  --ease-out-soft: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-overshoot: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --duration-fast: 150ms;
+  --duration-base: 220ms;
+  --duration-slow: 360ms;
 }
 
-html, body, #root {
-  height: 100%;
-  margin: 0;
-  padding: 0;
-  overflow: hidden;
+@layer base {
+  :root {
+    --sidebar-width: 232px;
+    --header-height: 64px;
+    /* Tells the engine to render native widgets and scrollbars dark. */
+    color-scheme: dark;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    overflow: hidden;
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* One ambient wash behind everything. The screens are dense, so the
+     background stays quiet — two very low-alpha pools, no animation. */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(60rem 40rem at 10% -12%, rgb(34 197 94 / 0.07), transparent 60%),
+      radial-gradient(52rem 34rem at 100% 0%, rgb(96 165 250 / 0.06), transparent 55%);
+  }
+
+  #root {
+    position: relative;
+    z-index: 1;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+
+  /* Figures line up in every table, KPI and payslip. */
+  th,
+  td,
+  input[type='number'],
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* One focus indicator for the whole app. Never removed, only restyled. */
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  button,
+  [role='button'],
+  summary {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [aria-disabled='true'] {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+
+  ::placeholder {
+    color: var(--color-muted-foreground);
+    opacity: 1;
+  }
+
+  ::selection {
+    background: rgb(34 197 94 / 0.3);
+    color: var(--color-foreground);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  /* A custom scrollbar is a control the user has to see to aim at, so the thumb
+     takes `--color-border-strong` (3.8:1 on the background) rather than the
+     separator tone, which is only 2.4:1 — under the 3:1 that WCAG 1.4.11 asks
+     of a non-text UI component. */
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-border-strong);
+    border: 2px solid transparent;
+    background-clip: content-box;
+    border-radius: 6px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-muted-foreground);
+    background-clip: content-box;
+  }
+
+  /* `prefers-reduced-motion` covers the whole sheet in one place, so no
+     component has to remember to opt out. Transitions are cut to 1ms rather
+     than 0 so `transitionend` listeners still fire. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 1ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 1ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }
 
-/* Layout Fixes */
-body {
-  overflow-x: hidden;
+@layer components {
+  /* ------------------------------------------------------------------ *
+   * Surfaces                                                           *
+   * ------------------------------------------------------------------ */
+
+  /* The glass primitive: translucent fill, a hairline that reads as light
+     catching the top edge, and one rung off the elevation ladder. Reserved
+     for chrome and overlays, which stay put while content scrolls. */
+  .glass {
+    background: rgb(27 35 54 / 0.72);
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+    border: 1px solid rgb(248 250 252 / 0.18);
+  }
+
+  /* Cards blur at 12px rather than 18px: they live inside scroll containers,
+     where every frame re-samples the backdrop, and this keeps a dense grid
+     inside the frame budget without losing the look. */
+  .card {
+    background: rgb(27 35 54 / 0.72);
+    backdrop-filter: blur(12px) saturate(140%);
+    -webkit-backdrop-filter: blur(12px) saturate(140%);
+    border: 1px solid rgb(248 250 252 / 0.18);
+    border-radius: var(--radius-panel);
+    box-shadow: var(--shadow-panel);
+    transition:
+      border-color var(--duration-fast) ease,
+      box-shadow var(--duration-fast) ease,
+      transform var(--duration-fast) var(--ease-out-soft);
+  }
+
+  /* Opt-in. A hover lift on a panel that is not a link or button would be
+     motion without meaning. */
+  .card-interactive {
+    cursor: pointer;
+  }
+
+  .card-interactive:hover {
+    transform: translateY(-2px);
+    border-color: rgb(34 197 94 / 0.45);
+    box-shadow: var(--shadow-raised);
+  }
+
+  /* Nested tiles inside a card: no blur — stacking two blurred layers costs a
+     second backdrop sample and reads as mud. */
+  .surface {
+    background: rgb(39 47 66 / 0.6);
+    border: 1px solid rgb(248 250 252 / 0.08);
+    border-radius: var(--radius-control);
+  }
+
+  .surface-muted {
+    background: rgb(15 23 42 / 0.45);
+    border: 1px solid rgb(248 250 252 / 0.06);
+    border-radius: var(--radius-control);
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Page scaffolding                                                   *
+   * ------------------------------------------------------------------ */
+
+  .page {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 4px;
+  }
+
+  .page-title {
+    font-family: var(--font-display);
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--color-foreground);
+  }
+
+  .page-subtitle {
+    font-size: 13px;
+    color: var(--color-muted-foreground);
+  }
+
+  .section-title {
+    font-family: var(--font-display);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--color-foreground);
+  }
+
+  .eyebrow {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--color-muted-foreground);
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Buttons                                                            *
+   * ------------------------------------------------------------------ */
+
+  /* 40px tall by default, which clears the 24x24 pointer-target minimum with
+     room to spare; `.btn-lg` reaches 48px for the touch-driven kiosk. */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    height: 40px;
+    min-width: 40px;
+    padding: 0 16px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background-color var(--duration-fast) ease,
+      border-color var(--duration-fast) ease,
+      color var(--duration-fast) ease,
+      transform var(--duration-fast) var(--ease-out-soft);
+  }
+
+  /* Sub-pixel press feedback inside 100ms, per the interaction guidance. */
+  .btn:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+
+  .btn:disabled,
+  .btn[aria-disabled='true'] {
+    opacity: 0.45;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  .btn-sm {
+    height: 34px;
+    padding: 0 12px;
+    font-size: 13px;
+  }
+
+  .btn-lg {
+    height: 48px;
+    min-width: 48px;
+    padding: 0 22px;
+    font-size: 15px;
+  }
+
+  .btn-icon {
+    width: 40px;
+    padding: 0;
+  }
+
+  /* One filled accent button per screen — the primary action. */
+  .btn-primary {
+    background: var(--color-accent);
+    color: var(--color-accent-foreground);
+    font-weight: 600;
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    background: #16a34a;
+  }
+
+  .btn-secondary {
+    background: var(--color-secondary);
+    color: var(--color-secondary-foreground);
+  }
+
+  .btn-secondary:hover:not(:disabled) {
+    background: #3f4d63;
+  }
+
+  .btn-outline {
+    background: transparent;
+    border-color: var(--color-border-strong);
+    color: var(--color-foreground);
+  }
+
+  .btn-outline:hover:not(:disabled) {
+    background: rgb(248 250 252 / 0.06);
+    border-color: var(--color-muted-foreground);
+  }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--color-muted-foreground);
+  }
+
+  .btn-ghost:hover:not(:disabled) {
+    background: rgb(248 250 252 / 0.06);
+    color: var(--color-foreground);
+  }
+
+  /* Solid red, not `--color-destructive`: white on #EF4444 is 3.8:1. */
+  .btn-danger {
+    background: var(--color-destructive-solid);
+    color: var(--color-destructive-foreground);
+    font-weight: 600;
+  }
+
+  .btn-danger:hover:not(:disabled) {
+    background: #b91c1c;
+  }
+
+  .btn-danger-ghost {
+    background: transparent;
+    color: var(--color-destructive);
+  }
+
+  .btn-danger-ghost:hover:not(:disabled) {
+    background: rgb(239 68 68 / 0.12);
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Forms                                                              *
+   * ------------------------------------------------------------------ */
+
+  /* Always rendered — placeholder text is not a label. */
+  .label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-foreground);
+  }
+
+  .label-required::after {
+    content: ' *';
+    color: var(--color-destructive);
+  }
+
+  .input,
+  .select,
+  .textarea {
+    width: 100%;
+    background: rgb(15 23 42 / 0.6);
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-control);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    transition:
+      border-color var(--duration-fast) ease,
+      box-shadow var(--duration-fast) ease;
+  }
+
+  .input,
+  .select {
+    height: 40px;
+    padding: 0 12px;
+  }
+
+  .textarea {
+    min-height: 96px;
+    padding: 10px 12px;
+    line-height: 1.5;
+    resize: vertical;
+  }
+
+  .input:focus,
+  .select:focus,
+  .textarea:focus {
+    outline: none;
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 3px rgb(34 197 94 / 0.22);
+  }
+
+  /* Keyboard users still get the white ring; it wins over the accent glow. */
+  .input:focus-visible,
+  .select:focus-visible,
+  .textarea:focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 1px;
+  }
+
+  .input:disabled,
+  .select:disabled,
+  .textarea:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  /* Read-only is not disabled: it stays legible and focusable. */
+  .input[readonly],
+  .textarea[readonly] {
+    background: rgb(15 23 42 / 0.3);
+    border-style: dashed;
+    color: var(--color-muted-foreground);
+  }
+
+  .input-invalid,
+  .input[aria-invalid='true'] {
+    border-color: var(--color-destructive);
+  }
+
+  .input-invalid:focus,
+  .input[aria-invalid='true']:focus {
+    border-color: var(--color-destructive);
+    box-shadow: 0 0 0 3px rgb(239 68 68 / 0.22);
+  }
+
+  /* WebKitGTK ignores `color-scheme` for the popup list on some builds, so the
+     options carry their own colours. */
+  .select option {
+    background: var(--color-card);
+    color: var(--color-foreground);
+  }
+
+  .help-text {
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--color-muted-foreground);
+  }
+
+  /* Sits directly under its field and is wired up with aria-describedby. */
+  .error-text {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--color-destructive);
+  }
+
+  /* An icon parked inside the field. The input pads itself to clear it. */
+  .input-group {
+    position: relative;
+  }
+
+  .input-group > .input-icon {
+    position: absolute;
+    top: 50%;
+    left: 12px;
+    transform: translateY(-50%);
+    color: var(--color-muted-foreground);
+    pointer-events: none;
+  }
+
+  .input-group > .input-icon ~ .input,
+  .input-group > .input-icon ~ .select {
+    padding-left: 38px;
+  }
+
+  /* Trailing slot: password reveal, clear, unit label. Kept clickable. */
+  .input-group > .input-affix {
+    position: absolute;
+    top: 50%;
+    right: 6px;
+    transform: translateY(-50%);
+  }
+
+  .checkbox {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--color-accent);
+    cursor: pointer;
+  }
+
+  /* Toggle switch. `role="switch"` on a button, so the knob is pure CSS. */
+  .switch {
+    position: relative;
+    flex-shrink: 0;
+    width: 44px;
+    height: 24px;
+    border-radius: 999px;
+    background: var(--color-secondary);
+    border: 1px solid var(--color-border-strong);
+    transition: background-color var(--duration-base) ease;
+  }
+
+  .switch::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    background: var(--color-foreground);
+    transition: transform var(--duration-base) var(--ease-out-soft);
+  }
+
+  .switch[aria-checked='true'] {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+  }
+
+  .switch[aria-checked='true']::after {
+    transform: translateX(20px);
+    background: var(--color-accent-foreground);
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Badges and chips                                                   *
+   * ------------------------------------------------------------------ */
+
+  /* Every badge carries a word, never colour alone. */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 10px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.4;
+    white-space: nowrap;
+  }
+
+  .badge-accent {
+    background: rgb(34 197 94 / 0.14);
+    border-color: rgb(34 197 94 / 0.35);
+    color: var(--color-accent);
+  }
+
+  .badge-warning {
+    background: rgb(251 191 36 / 0.14);
+    border-color: rgb(251 191 36 / 0.35);
+    color: var(--color-warning);
+  }
+
+  .badge-danger {
+    background: rgb(239 68 68 / 0.14);
+    border-color: rgb(239 68 68 / 0.35);
+    color: var(--color-destructive);
+  }
+
+  .badge-info {
+    background: rgb(96 165 250 / 0.14);
+    border-color: rgb(96 165 250 / 0.35);
+    color: var(--color-info);
+  }
+
+  .badge-muted {
+    background: rgb(148 163 184 / 0.14);
+    border-color: rgb(148 163 184 / 0.32);
+    color: var(--color-muted-foreground);
+  }
+
+  /* A count or short status that sits next to a label. */
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: var(--color-muted);
+    font-size: 11px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Tables                                                             *
+   * ------------------------------------------------------------------ */
+
+  .table-container {
+    overflow: auto;
+    border: 1px solid rgb(248 250 252 / 0.1);
+    border-radius: var(--radius-panel);
+    background: rgb(15 23 42 / 0.35);
+  }
+
+  .table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  /* Sticky header, so scanning 200 payroll rows never loses the column names. */
+  .table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: 12px 16px;
+    background: #1f2739;
+    border-bottom: 1px solid var(--color-border);
+    text-align: left;
+    font-family: var(--font-display);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--color-muted-foreground);
+    white-space: nowrap;
+  }
+
+  .table tbody td {
+    padding: 12px 16px;
+    border-bottom: 1px solid rgb(248 250 252 / 0.07);
+    font-size: 14px;
+    color: var(--color-foreground);
+    vertical-align: middle;
+  }
+
+  .table tbody tr:last-child td {
+    border-bottom: none;
+  }
+
+  .table tbody tr {
+    transition: background-color var(--duration-fast) ease;
+    /* Keeps a focused control clear of the sticky header. */
+    scroll-margin-top: 48px;
+  }
+
+  .table tbody tr:hover {
+    background: rgb(248 250 252 / 0.04);
+  }
+
+  .table .num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Overlays                                                           *
+   * ------------------------------------------------------------------ */
+
+  /* The blur here is the signal that the layer behind is dismissible. */
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgb(2 6 23 / 0.7);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    animation: overlay-in var(--duration-fast) ease-out both;
+  }
+
+  .modal-panel {
+    width: 100%;
+    max-height: calc(100vh - 48px);
+    overflow-y: auto;
+    background: rgb(27 35 54 / 0.92);
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+    border: 1px solid rgb(248 250 252 / 0.18);
+    border-radius: var(--radius-panel);
+    box-shadow: var(--shadow-overlay);
+    animation: modal-in var(--duration-base) var(--ease-out-soft) both;
+  }
+
+  /* Popovers and dropdowns are opaque: text over a blurred table is unreadable. */
+  .popover {
+    background: #1f2739;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-control);
+    box-shadow: var(--shadow-overlay);
+    animation: modal-in var(--duration-fast) var(--ease-out-soft) both;
+  }
+
+  .menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 9px 12px;
+    border-radius: 8px;
+    font-size: 14px;
+    color: var(--color-foreground);
+    text-align: left;
+    transition: background-color var(--duration-fast) ease;
+  }
+
+  .menu-item:hover {
+    background: rgb(248 250 252 / 0.07);
+  }
+
+  .menu-item-danger {
+    color: var(--color-destructive);
+  }
+
+  .menu-item-danger:hover {
+    background: rgb(239 68 68 / 0.12);
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Navigation                                                         *
+   * ------------------------------------------------------------------ */
+
+  .nav-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 9px 12px;
+    border-radius: var(--radius-control);
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--color-muted-foreground);
+    transition:
+      background-color var(--duration-fast) ease,
+      color var(--duration-fast) ease;
+  }
+
+  .nav-item:hover {
+    background: rgb(248 250 252 / 0.06);
+    color: var(--color-foreground);
+  }
+
+  /* Active state is a filled tint plus a left rail plus the icon going accent —
+     three signals, so it never rests on colour alone. */
+  .nav-item-active {
+    background: rgb(34 197 94 / 0.12);
+    color: var(--color-foreground);
+    font-weight: 600;
+  }
+
+  .nav-item-active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 8px;
+    bottom: 8px;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: var(--color-accent);
+  }
+
+  .nav-item-active .nav-icon {
+    color: var(--color-accent);
+  }
+
+  .nav-icon {
+    display: inline-flex;
+    flex-shrink: 0;
+    color: inherit;
+  }
+
+  /* Tabs share the rail idea, rotated. */
+  .tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 38px;
+    padding: 0 14px;
+    border-bottom: 2px solid transparent;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--color-muted-foreground);
+    transition:
+      color var(--duration-fast) ease,
+      border-color var(--duration-fast) ease;
+  }
+
+  .tab:hover {
+    color: var(--color-foreground);
+  }
+
+  .tab-active {
+    color: var(--color-foreground);
+    border-bottom-color: var(--color-accent);
+    font-weight: 600;
+  }
+
+  /* Segmented control, for the payroll cutoff and kiosk mode switches. */
+  .segment {
+    display: inline-flex;
+    padding: 3px;
+    gap: 3px;
+    background: rgb(15 23 42 / 0.6);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-control);
+  }
+
+  .segment-item {
+    height: 32px;
+    padding: 0 14px;
+    border-radius: 7px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-muted-foreground);
+    transition:
+      background-color var(--duration-fast) ease,
+      color var(--duration-fast) ease;
+  }
+
+  .segment-item:hover {
+    color: var(--color-foreground);
+  }
+
+  .segment-item-active {
+    background: var(--color-secondary);
+    color: var(--color-foreground);
+    font-weight: 600;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Status and feedback                                                *
+   * ------------------------------------------------------------------ */
+
+  .spinner {
+    display: inline-block;
+    width: 18px;
+    height: 18px;
+    border: 2px solid rgb(248 250 252 / 0.25);
+    border-top-color: currentColor;
+    border-radius: 999px;
+    animation: spin 700ms linear infinite;
+  }
+
+  .spinner-lg {
+    width: 34px;
+    height: 34px;
+    border-width: 3px;
+  }
+
+  /* Skeletons stand in for anything over a second, instead of a bare spinner. */
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      rgb(148 163 184 / 0.08) 25%,
+      rgb(148 163 184 / 0.16) 37%,
+      rgb(148 163 184 / 0.08) 63%
+    );
+    background-size: 400% 100%;
+    border-radius: 8px;
+    animation: shimmer 1.4s ease-in-out infinite;
+  }
+
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 48px 24px;
+    text-align: center;
+    color: var(--color-muted-foreground);
+  }
+
+  .empty-state-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 56px;
+    height: 56px;
+    border-radius: 999px;
+    background: rgb(148 163 184 / 0.1);
+    color: var(--color-muted-foreground);
+  }
+
+  /* Inline banners. Each pairs its colour with an icon and a heading. */
+  .alert {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 14px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+    font-size: 13px;
+  }
+
+  .alert-success {
+    background: rgb(34 197 94 / 0.1);
+    border-color: rgb(34 197 94 / 0.3);
+    color: #86efac;
+  }
+
+  .alert-danger {
+    background: rgb(239 68 68 / 0.1);
+    border-color: rgb(239 68 68 / 0.3);
+    color: #fca5a5;
+  }
+
+  .alert-warning {
+    background: rgb(251 191 36 / 0.1);
+    border-color: rgb(251 191 36 / 0.3);
+    color: #fcd34d;
+  }
+
+  .alert-info {
+    background: rgb(96 165 250 / 0.1);
+    border-color: rgb(96 165 250 / 0.3);
+    color: #93c5fd;
+  }
+
+  .progress {
+    height: 8px;
+    border-radius: 999px;
+    background: rgb(15 23 42 / 0.7);
+    overflow: hidden;
+  }
+
+  .progress-bar {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    background: var(--color-accent);
+    transition: width var(--duration-slow) var(--ease-out-soft);
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Data display                                                       *
+   * ------------------------------------------------------------------ */
+
+  .kpi-label {
+    font-size: 12px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-muted-foreground);
+  }
+
+  .kpi-value {
+    font-family: var(--font-display);
+    font-size: 26px;
+    font-weight: 600;
+    line-height: 1.15;
+    color: var(--color-foreground);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .kpi-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    height: 42px;
+    flex-shrink: 0;
+    border-radius: var(--radius-control);
+  }
+
+  /* A definition pair, used all over the payslip and profile views. */
+  .field-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 8px 0;
+    font-size: 14px;
+  }
+
+  .field-key {
+    color: var(--color-muted-foreground);
+  }
+
+  .field-value {
+    font-family: var(--font-display);
+    font-weight: 500;
+    color: var(--color-foreground);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
+
+  .divider {
+    height: 1px;
+    border: 0;
+    background: rgb(248 250 252 / 0.09);
+  }
+
+  .avatar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--color-secondary);
+    border: 1px solid rgb(248 250 252 / 0.18);
+    color: var(--color-foreground);
+    font-family: var(--font-display);
+    font-weight: 600;
+  }
+
+  .avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .link {
+    color: var(--color-accent);
+    font-weight: 500;
+    text-decoration-line: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+    transition: color var(--duration-fast) ease;
+  }
+
+  .link:hover {
+    color: #4ade80;
+  }
+
+  .kbd {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 6px;
+    border: 1px solid var(--color-border-strong);
+    border-bottom-width: 2px;
+    border-radius: 5px;
+    background: var(--color-primary);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--color-muted-foreground);
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Motion                                                             *
+   * ------------------------------------------------------------------ */
+
+  .fade-in {
+    animation: fade-in var(--duration-base) ease-out both;
+  }
+
+  .slide-in {
+    animation: slide-in var(--duration-slow) var(--ease-out-soft) both;
+  }
+
+  /* Card grids get the overshoot; the entrance reads as physical. Set
+     `style={{ '--i': index }}` on each child. 40ms apart, capped so a long
+     list does not keep the last item waiting. */
+  .stagger-card {
+    animation: rise-in var(--duration-slow) var(--ease-overshoot) both;
+    animation-delay: calc(min(var(--i, 0), 12) * 40ms);
+  }
+
+  /* Table rows get plain ease-out. The overshoot reads as sloppy on dense
+     informational rows, which is the one place it must not be used. */
+  .stagger-row {
+    animation: fade-in var(--duration-base) ease-out both;
+    animation-delay: calc(min(var(--i, 0), 16) * 25ms);
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Text handling                                                      *
+   * ------------------------------------------------------------------ */
+
+  /* Emails, license keys and IDs reflow instead of forcing a scrollbar. */
+  .wrap-anywhere {
+    overflow-wrap: anywhere;
+    min-width: 0;
+  }
+
+  /* Truncation is the fallback, not the default; pair with a title attribute. */
+  .truncate-1 {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .truncate-2 {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+  }
 }
 
-/* Custom Scrollbar */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
-::-webkit-scrollbar-track {
-  background: #f1f5f9;
-  border-radius: 4px;
+@keyframes shimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0 50%;
+  }
 }
 
-::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
-}
-
-/* Animation Classes */
-.fade-in {
-  animation: fadeIn 0.3s ease-in-out;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-.slide-in {
-  animation: slideIn 0.3s ease-out;
-}
-
-@keyframes slideIn {
+@keyframes fade-in {
   from {
-    transform: translateY(-10px);
     opacity: 0;
   }
   to {
-    transform: translateY(0);
     opacity: 1;
   }
 }
 
-/* Card Styles */
-.card {
-  background: white;
-  border-radius: 12px;
-  border: 1px solid #e2e8f0;
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
-  transition: all 0.2s ease;
-}
-
-.card:hover {
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-}
-
-/* Button Styles */
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 10px 20px;
-  border-radius: 10px;
-  font-weight: 500;
-  transition: all 0.2s ease;
-  cursor: pointer;
-  border: none;
-  font-size: 14px;
-}
-
-.btn-primary {
-  background: linear-linear(135deg, #3b82f6 0%, #2563eb 100%);
-  color: white;
-}
-
-.btn-primary:hover {
-  background: linear-linear(135deg, #2563eb 0%, #1d4ed8 100%);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
-}
-
-.btn-outline {
-  background: transparent;
-  border: 1.5px solid #cbd5e1;
-  color: #475569;
-}
-
-.btn-outline:hover {
-  background: #f8fafc;
-  border-color: #94a3b8;
-}
-
-/* Badge Styles */
-.badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 4px 12px;
-  border-radius: 20px;
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 1;
-}
-
-.badge-success {
-  background-color: #d1fae5;
-  color: #065f46;
-}
-
-.badge-warning {
-  background-color: #fef3c7;
-  color: #92400e;
-}
-
-.badge-danger {
-  background-color: #fee2e2;
-  color: #991b1b;
-}
-
-/* Table Styles */
-.table-container {
-  overflow-x: auto;
-  border-radius: 12px;
-  border: 1px solid #e2e8f0;
-}
-
-.table {
-  width: 100%;
-  border-collapse: collapse;
-  min-width: 800px;
-}
-
-.table th {
-  padding: 16px 20px;
-  text-align: left;
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #64748b;
-  background-color: #f8fafc;
-  border-bottom: 1px solid #e2e8f0;
-}
-
-.table td {
-  padding: 16px 20px;
-  font-size: 14px;
-  color: #334155;
-  border-bottom: 1px solid #e2e8f0;
-}
-
-.table tbody tr:hover {
-  background-color: #f8fafc;
-}
-
-/* Form Styles */
-.form-input {
-  width: 100%;
-  padding: 10px 16px;
-  border-radius: 10px;
-  border: 1px solid #cbd5e1;
-  font-size: 14px;
-  transition: all 0.2s ease;
-}
-
-.form-input:focus {
-  outline: none;
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-}
-
-/* Glass Effect */
-.glass {
-  background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-}
-
-/* linear Text */
-.linear-text {
-  background: linear-linear(135deg, #667eea 0%, #764ba2 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-/* Responsive Fixes */
-@media (max-width: 768px) {
-  .table th, .table td {
-    padding: 12px 16px;
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
   }
-  
-  .card {
-    border-radius: 8px;
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Enters from below: down is deeper in the hierarchy, so arriving content
+   rises into place. */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Scales up from the trigger's plane rather than dropping in from nowhere. */
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
 }

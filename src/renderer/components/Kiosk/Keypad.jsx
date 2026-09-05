@@ -1,47 +1,56 @@
 import React from 'react';
 import { Delete } from 'lucide-react';
 
+/**
+ * The kiosk number pad.
+ *
+ * Same three-column layout and the same four callbacks as before; what changed
+ * is that the keys were white-on-white cards in an otherwise dark app, and none
+ * of them declared `type="button"`, so each one submitted any form it was
+ * dropped into. The 64 px rows are kept deliberately: this is the one surface in
+ * the app operated by a queue of people with a finger.
+ */
 const Keypad = ({ onKeyPress, onClear, onEnter, showEnter = true }) => {
-    const keys = [1, 2, 3, 4, 5, 6, 7, 8, 9, '', 0, 'DEL'];
+  const keys = [1, 2, 3, 4, 5, 6, 7, 8, 9, '', 0, 'DEL'];
 
-    return (
-        <div className="grid grid-cols-3 gap-4 w-full max-w-[320px] mx-auto">
-            {keys.map((key, index) => {
-                if (key === '') return <div key={index} />; // Spacer
+  return (
+    <div className="mx-auto grid w-full max-w-[320px] grid-cols-3 gap-3">
+      {keys.map((key, index) => {
+        if (key === '') return <div key={index} aria-hidden="true" />;
 
-                if (key === 'DEL') {
-                    return (
-                        <button
-                            key={index}
-                            onClick={onClear}
-                            className="h-16 rounded-xl bg-red-50 text-red-600 hover:bg-red-100 flex items-center justify-center transition-colors shadow-sm border border-red-100 active:scale-95"
-                        >
-                            <Delete size={24} />
-                        </button>
-                    );
-                }
+        if (key === 'DEL') {
+          return (
+            <button
+              key={index}
+              type="button"
+              onClick={onClear}
+              className="btn btn-danger-ghost h-16"
+              aria-label="Delete the last digit"
+            >
+              <Delete size={24} aria-hidden="true" />
+            </button>
+          );
+        }
 
-                return (
-                    <button
-                        key={index}
-                        onClick={() => onKeyPress(key)}
-                        className="h-16 rounded-xl bg-white text-gray-800 text-2xl font-semibold hover:bg-gray-50 transition-all shadow-sm border border-gray-200 active:scale-95 active:shadow-inner"
-                    >
-                        {key}
-                    </button>
-                );
-            })}
+        return (
+          <button
+            key={index}
+            type="button"
+            onClick={() => onKeyPress(key)}
+            className="btn btn-outline h-16 text-2xl"
+          >
+            {key}
+          </button>
+        );
+      })}
 
-            {showEnter && (
-                <button
-                    onClick={onEnter}
-                    className="col-span-3 h-14 mt-2 rounded-xl bg-blue-600 text-white text-lg font-medium hover:bg-blue-700 transition-all shadow-md active:scale-95"
-                >
-                    Enter
-                </button>
-            )}
-        </div>
-    );
+      {showEnter && (
+        <button type="button" onClick={onEnter} className="btn btn-primary col-span-3 mt-1 h-14 text-base">
+          Enter
+        </button>
+      )}
+    </div>
+  );
 };
 
 export default Keypad;

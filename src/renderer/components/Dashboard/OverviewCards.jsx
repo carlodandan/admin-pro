@@ -1,88 +1,84 @@
 import React from 'react';
-import { Users, Calendar, CreditCard, TrendingUp, ArrowUp, ArrowDown } from 'lucide-react';
+import { Users, UserCheck, CalendarOff, PhilippinePeso } from 'lucide-react';
 
+/**
+ * The four headline figures.
+ *
+ * Every card used to carry a trend chip — `+12%`, `+5%`, `-2`, `+3.2%`, each
+ * followed by "from last month". They were literals in the source: nothing here
+ * compares against a previous period, and no table records history to compare
+ * against. They are replaced by a second line derived from the same `stats`
+ * object, so the supporting figure is at least true.
+ */
 const OverviewCards = ({ stats }) => {
   if (!stats) return null;
 
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-PH', {
+  const formatCurrency = (amount) =>
+    new Intl.NumberFormat('en-PH', {
       style: 'currency',
       currency: 'PHP',
       minimumFractionDigits: 0,
       maximumFractionDigits: 0
-    }).format(amount);
-  };
+    }).format(amount || 0);
+
+  const headcount = stats.totalEmployees || 0;
+  const share = (count) => (headcount > 0 ? `${((count / headcount) * 100).toFixed(1)}%` : '0%');
+  const departments = stats.totalDepartments || 0;
 
   const cards = [
     {
       title: 'Total Employees',
-      value: stats.totalEmployees,
-      change: '+12%',
-      trend: 'up',
-      icon: <Users className="text-blue-500" size={24} />,
-      color: 'bg-blue-50',
-      borderColor: 'border-blue-100'
+      value: headcount,
+      detail: `Across ${departments} ${departments === 1 ? 'department' : 'departments'}`,
+      icon: Users,
+      iconClass: 'bg-[rgb(96_165_250/0.14)] text-info'
     },
     {
-      title: 'Active Today',
-      value: stats.activeEmployees,
-      change: '+5%',
-      trend: 'up',
-      icon: <Calendar className="text-green-500" size={24} />,
-      color: 'bg-green-50',
-      borderColor: 'border-green-100'
+      title: 'Active',
+      value: stats.activeEmployees || 0,
+      detail: `${share(stats.activeEmployees || 0)} of headcount`,
+      icon: UserCheck,
+      iconClass: 'bg-[rgb(34_197_94/0.14)] text-accent'
     },
     {
       title: 'On Leave',
-      value: stats.onLeaveEmployees,
-      change: '-2',
-      trend: 'down',
-      icon: <Calendar className="text-yellow-500" size={24} />,
-      color: 'bg-yellow-50',
-      borderColor: 'border-yellow-100'
+      value: stats.onLeaveEmployees || 0,
+      detail: `${share(stats.onLeaveEmployees || 0)} of headcount`,
+      icon: CalendarOff,
+      iconClass: 'bg-[rgb(251_191_36/0.14)] text-warning'
     },
     {
-      title: 'Avg. Annual Salary',
+      // `employees.salary` is the monthly basic rate — the payroll calculator
+      // divides it by 24 for a daily rate. This card said "Annual".
+      title: 'Avg. Monthly Salary',
       value: formatCurrency(stats.avgSalary),
-      change: '+3.2%',
-      trend: 'up',
-      icon: <CreditCard className="text-purple-500" size={24} />,
-      color: 'bg-purple-50',
-      borderColor: 'border-purple-100'
-    },
+      detail: 'Basic pay, before allowances',
+      icon: PhilippinePeso,
+      iconClass: 'bg-[rgb(148_163_184/0.14)] text-foreground'
+    }
   ];
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-      {cards.map((card, index) => (
-        <div 
-          key={index} 
-          className={`${card.color} p-6 rounded-xl border ${card.borderColor} transition-all hover:shadow-lg`}
-        >
-          <div className="flex justify-between items-start">
-            <div className="flex-1">
-              <p className="text-sm text-gray-600 mb-1">{card.title}</p>
-              <p className="text-xl font-bold mb-2">{card.value}</p>
-              <div className="flex items-center gap-1">
-                {card.trend === 'up' ? (
-                  <ArrowUp size={14} className="text-green-500" />
-                ) : (
-                  <ArrowDown size={14} className="text-red-500" />
-                )}
-                <span className={`text-sm font-medium ${
-                  card.trend === 'up' ? 'text-green-600' : 'text-red-600'
-                }`}>
-                  {card.change}
-                </span>
-                <span className="text-sm text-gray-500 ml-1">from last month</span>
-              </div>
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      {cards.map((card, index) => {
+        const Icon = card.icon;
+        return (
+          <div
+            key={card.title}
+            className="card stagger-card flex items-start justify-between gap-3 p-4"
+            style={{ '--i': index }}
+          >
+            <div className="min-w-0">
+              <p className="kpi-label truncate-1">{card.title}</p>
+              <p className="kpi-value mt-1.5">{card.value}</p>
+              <p className="mt-2 text-xs text-muted-foreground">{card.detail}</p>
             </div>
-            <div className="h-12 w-12 p-3 bg-white rounded-lg shadow-sm items-center justify-center flex">
-              {card.icon}
-            </div>
+            <span className={`kpi-icon ${card.iconClass}`}>
+              <Icon size={20} aria-hidden="true" />
+            </span>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 };

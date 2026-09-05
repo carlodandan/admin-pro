@@ -56,7 +56,7 @@ function App() {
       }
 
       // First check if system is registered
-      const registrationCheck = await window.electronAPI.isSystemRegistered();
+      const registrationCheck = await window.api.isSystemRegistered();
 
       if (registrationCheck.success) {
         setIsRegistered(registrationCheck.isRegistered);
@@ -90,7 +90,7 @@ function App() {
   const handleRegistration = async (registrationData) => {
     try {
 
-      const result = await window.electronAPI.registerSystem(registrationData);
+      const result = await window.api.registerSystem(registrationData);
 
 
 
@@ -110,7 +110,7 @@ function App() {
 
   const handleLogin = async (email, password) => {
     try {
-      const result = await window.electronAPI.loginUser(email, password);
+      const result = await window.api.loginUser(email, password);
 
       if (result.success) {
         // Store authentication data
@@ -131,21 +131,25 @@ function App() {
         setUserInfo(userData);
         setIsAuthenticated(true);
 
-        // Load user profile from database
+        // Load the stored profile over the placeholder name. This called
+        // `getUserSettings`, which only selects `theme_preference` and
+        // `language`, and then read `displayName`/`position`/`department` off
+        // it — all three undefined, so the header kept the email prefix no
+        // matter what was saved. `getUserProfile` returns the real columns,
+        // named as the database names them. There is no `department` column.
         try {
-          const userSettings = await window.electronAPI.getUserSettings(email);
-          if (userSettings) {
+          const storedProfile = await window.api.getUserProfile(email);
+          if (storedProfile) {
             const updatedUserData = {
               ...userData,
-              name: userSettings.displayName || userData.name,
-              position: userSettings.position || userData.position,
-              department: userSettings.department || userData.department
+              name: storedProfile.display_name || userData.name,
+              position: storedProfile.position || userData.position
             };
             localStorage.setItem('userInfo', JSON.stringify(updatedUserData));
             setUserInfo(updatedUserData);
           }
         } catch (dbError) {
-          console.warn('Could not load user settings on login:', dbError);
+          console.warn('Could not load the stored profile on login:', dbError);
         }
 
         return { success: true, user: userData };
@@ -160,7 +164,7 @@ function App() {
   // Function for password reset
   const handlePasswordReset = async (email, superAdminPassword, newPassword) => {
     try {
-      const result = await window.electronAPI.resetAdminPassword(
+      const result = await window.api.resetAdminPassword(
         email,
         superAdminPassword,
         newPassword
@@ -197,10 +201,14 @@ function App() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-900">
-        <div className="flex flex-col items-center">
-          <div className="h-12 w-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-          <p className="text-gray-400">Checking system registration...</p>
+      <div className="flex min-h-screen items-center justify-center">
+        <div
+          className="flex flex-col items-center gap-4"
+          role="status"
+          aria-live="polite"
+        >
+          <span className="spinner spinner-lg text-accent" aria-hidden="true" />
+          <p className="text-sm text-muted-foreground">Checking system registration…</p>
         </div>
       </div>
     );

@@ -1,0 +1,69 @@
+[package]
+name = "admin-pro"
+version = "1.0.0"
+description = "Company Administration System Application"
+authors = ["Carlo Dandan <carlodandan.personal@proton.me>"]
+license = "MIT"
+repository = "https://github.com/carlodandan/admin-pro"
+edition = "2021"
+rust-version = "1.77.2"
+
+# The library is what Tauri's mobile/desktop entry points share.
+[lib]
+name = "admin_pro_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-clipboard-manager = "2"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Local database
+rusqlite = { version = "0.32", features = ["bundled", "serde_json"] }
+
+# Crypto: bcrypt password hashing + AES-256-GCM at-rest encryption
+bcrypt = "0.15"
+aes-gcm = "0.10"
+rand = "0.8"
+sha2 = "0.10"
+hex = "0.4"
+
+# Cloud database (Supabase REST / GoTrue)
+reqwest = { version = "0.12", default-features = false, features = [
+    "json",
+    "rustls-tls",
+] }
+tokio = { version = "1", features = ["sync", "time", "rt", "macros"] }
+
+# Dates in Asia/Manila
+chrono = { version = "0.4", default-features = false, features = [
+    "clock",
+    "std",
+] }
+chrono-tz = "0.10"
+
+uuid = { version = "1", features = ["v4"] }
+thiserror = "1"
+dotenvy = "0.15"
+
+[features]
+# This feature is used for production builds where `devUrl` is not used.
+custom-protocol = ["tauri/custom-protocol"]
+# Electron's `toggleDevTools` role worked in packaged builds, so the View menu
+# item keeps working in release here too.
+devtools = ["tauri/devtools"]
+default = ["devtools"]
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

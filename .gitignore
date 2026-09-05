@@ -90,9 +90,11 @@ typings/
 
 # Vite
 .vite/
+dist/
 
-# Electron-Forge
-out/
+# Tauri
+src-tauri/target/
+src-tauri/gen/
 
 # Agent
 .agent/

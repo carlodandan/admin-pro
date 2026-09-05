@@ -8,9 +8,12 @@ create extension if not exists "uuid-ossp";
 -- ========== TABLES ==========
 
 -- Departments Table
+-- `name` is unique because the sync matches cloud departments by name
+-- (`PATCH /departments?name=eq.…` in src-tauri/src/supabase/sync.rs); without
+-- the constraint two rows can share a name and the update hits both.
 create table if not exists public.departments (
   id bigint primary key generated always as identity,
-  name text not null,
+  name text not null unique,
   budget numeric(15, 2) default 0,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
   updated_at timestamp with time zone default timezone('utc'::text, now()) not null
