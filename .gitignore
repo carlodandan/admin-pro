@@ -117,5 +117,8 @@ signkey/adminpro.key.pub
 # MCP Config File
 .mcp.json
 
-# Supabase
-supabase/
+# Supabase — local CLI state and secrets only. supabase/migrations/ is the cloud
+# schema (RLS, the keyring RPCs) and belongs in the repo, so it is not ignored.
+supabase/.branches/
+supabase/.temp/
+supabase/.env
