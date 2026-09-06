@@ -280,7 +280,10 @@ function App() {
               {isRegistered ? (
                 <Navigate to="/login" replace />
               ) : (
-                <RegistrationPage onRegister={handleRegistration} />
+                <RegistrationPage
+                  onRegister={handleRegistration}
+                  onComplete={() => setIsRegistered(true)}
+                />
               )}
             </PublicRoute>
           } />

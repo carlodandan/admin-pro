@@ -73,8 +73,7 @@ Consequences of this split that matter when reading the code:
 4. The window is created **hidden** (`visible: false` in `tauri.conf.json`) with the
    background already set to `#0F172A`, so there is no white flash. It is shown when the
    frontend calls `frontend_ready`, or after a 10-second fallback if that never arrives.
-5. The tray icon and the native menu are installed (`menu.rs`).
-6. `start_sync` fires one sync pass immediately, then every 30 minutes.
+5. `start_sync` fires one sync pass immediately, then every 30 minutes.
 
 A sync pass is also triggered once per successful sign-in.
 
@@ -84,13 +83,12 @@ A sync pass is also triggered once per successful sign-in.
 
 | Path | Responsibility |
 |---|---|
-| `lib.rs` | Module tree, plugin registration, window/tray/menu setup, the sync scheduler, and the command registry. |
+| `lib.rs` | Module tree, window setup, the sync scheduler, and the command registry. |
 | `main.rs` | Thin binary entry point; calls `admin_pro_lib::run()`. |
 | `state.rs` | `AppState` — data dir, the SQLite connection behind a mutex, `fresh_database`, the optional Supabase client, and the DEK slot (`unlock` / `lock` / `dek`). |
 | `error.rs` | `AppError` and the `Result` alias every command returns. |
 | `json.rs` | Helpers for shaping `serde_json::Value` rows out of SQLite. |
 | `manila.rs` | Asia/Manila date arithmetic — cut-off boundaries, "today", month ranges. |
-| `menu.rs` | Native application menu, including the View → Developer Tools item. |
 | `auth/mod.rs` | Registration, sign-in, sign-out, password change, recovery, and the local profile mirror. The largest single module. |
 | `auth/crypto.rs` | `generate_license_key` only. Everything else moved to `crypto/`. |
 | `crypto/mod.rs` | DEK generation, `wrap`/`unwrap`, `encrypt_field`/`decrypt_field`, blind indexes, `secret_eq`. Unit-tested. |

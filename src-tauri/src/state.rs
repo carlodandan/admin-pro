@@ -27,7 +27,6 @@ pub struct AppState {
     pub fresh_database: bool,
     pub supabase: Option<Arc<Supabase>>,
     pub app_version: String,
-    pub zoom: Mutex<f64>,
 }
 
 impl AppState {
@@ -47,7 +46,6 @@ impl AppState {
             fresh_database,
             supabase,
             app_version,
-            zoom: Mutex::new(1.0),
         }
     }
 

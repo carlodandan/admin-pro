@@ -91,7 +91,7 @@ const RevealButton = ({ revealed, onClick, label }) => (
   </button>
 );
 
-const RegistrationPage = ({ onRegister }) => {
+const RegistrationPage = ({ onRegister, onComplete }) => {
   const navigate = useNavigate();
 
   const [formData, setFormData] = useState({
@@ -516,7 +516,17 @@ const RegistrationPage = ({ onRegister }) => {
 
               <button
                 type="button"
-                onClick={() => navigate('/login')}
+                onClick={() => {
+                  if (formData.admin_email) {
+                    try {
+                      localStorage.setItem('rememberedEmail', formData.admin_email);
+                    } catch (e) {
+                      console.warn('Could not remember email:', e);
+                    }
+                  }
+                  onComplete?.();
+                  navigate('/login');
+                }}
                 disabled={!adoptedExistingKey && !acknowledged}
                 className="btn btn-primary btn-lg mt-4 w-full"
               >

@@ -8,7 +8,6 @@ mod db;
 mod error;
 mod json;
 mod manila;
-mod menu;
 mod state;
 mod supabase;
 
@@ -36,16 +35,10 @@ pub fn run() {
     let _ = dotenvy::dotenv();
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             let handle = app.handle().clone();
             let shared = Arc::new(build_state(&handle)?);
             app.manage(shared.clone());
-
-            app.set_menu(menu::build(&handle)?)?;
-            app.on_menu_event(menu::handle);
 
             watch_window(&handle);
             start_sync(&handle, shared);

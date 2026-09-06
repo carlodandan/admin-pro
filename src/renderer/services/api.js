@@ -74,7 +74,6 @@ const api = {
   getLatestAttendance: (employeeId) => invoke('get_latest_attendance', { employeeId }),
 
   // Events
-  onExportData: (callback) => on('export-data', callback),
   onWindowMaximized: (callback) => on('window-maximized', callback),
   onWindowUnmaximized: (callback) => on('window-unmaximized', callback),
 
