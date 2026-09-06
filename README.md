@@ -18,6 +18,7 @@ PINs at rest in *both* databases under a single key that never touches disk in p
 | **Cloud database** | Supabase (Postgres 17) over the REST/PostgREST API |
 | **Credentials** | Supabase GoTrue only — no password hash is ever stored locally |
 | **Sync direction** | Local → cloud, with one exception (see below) |
+| **Localization** | Philippines (Asia/Manila UTC+8, BIR tax, SSS, PhilHealth, Pag-IBIG) |
 | **Installer** | NSIS, per-user install |
 
 ---
@@ -26,6 +27,7 @@ PINs at rest in *both* databases under a single key that never touches disk in p
 
 - [Security model at a glance](#security-model-at-a-glance)
 - [Features](#features)
+- [Philippine Localization](#philippine-localization)
 - [Prerequisites](#prerequisites)
 - [Setup](#setup)
 - [Running in development](#running-in-development)
@@ -89,6 +91,23 @@ the interface is unchanged.
 
 **Offline-first** — every screen reads and writes the local SQLite database. Cloud
 connectivity affects sign-in and backup, never day-to-day use.
+
+---
+
+## Philippine Localization
+
+Admin Pro is configured out of the box for businesses operating in the **Philippines**:
+
+- **Timezone (`Asia/Manila`, UTC+8)**: Attendance logging, kiosk clock-in/out, timestamps, cut-off boundaries, and reports strictly adhere to Manila time, preventing discrepancies caused by host system clock or regional setting mismatches.
+- **Mandatory Government Contributions**: Built-in statutory tables for automatic computation of:
+  - **SSS** (Social Security System)
+  - **PhilHealth** (Philippine Health Insurance Corporation)
+  - **Pag-IBIG** (Home Development Mutual Fund / HDMF)
+- **Withholding Taxes**: Automated graduated income tax computation compliant with the Bureau of Internal Revenue (BIR) under the TRAIN law.
+- **Bi-Monthly Cut-off Cycles**: Pre-configured standard Philippine payroll periods:
+  - **1st Cut-off**: 1st to 15th of the month
+  - **2nd Cut-off**: 16th to end of the month
+- **Currency & Formatting**: All salaries, allowances, contributions, and payslips are formatted in **Philippine Peso (₱ / PHP)**.
 
 ---
 
